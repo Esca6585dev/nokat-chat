@@ -1,0 +1,5 @@
+nokat.db*
+*.db-wal
+*.db-shm
+.env
+/nokat-server
