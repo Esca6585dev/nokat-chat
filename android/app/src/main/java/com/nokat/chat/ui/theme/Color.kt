@@ -1,0 +1,35 @@
+package com.nokat.chat.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+// Brand (docs/API.md "Brand")
+val BrandPrimary = Color(0xFF2563EB)
+val BrandPrimaryDark = Color(0xFF1E40AF)
+val BrandSky = Color(0xFF38BDF8)
+val BrandBlue500 = Color(0xFF3B82F6)
+val LightBackground = Color(0xFFF4F8FF)
+val DarkBackground = Color(0xFF0B1220)
+val IncomingLight = Color(0xFFFFFFFF)
+val IncomingDark = Color(0xFF1E293B)
+
+// Supporting palette
+val Sky300 = Color(0xFF7DD3FC)
+val Sky100 = Color(0xFFE0F2FE)
+val Blue100 = Color(0xFFDBEAFE)
+val Blue200 = Color(0xFFBFDBFE)
+val Blue300 = Color(0xFF93C5FD)
+val Blue400 = Color(0xFF60A5FA)
+val Blue900 = Color(0xFF1E3A8A)
+val Slate50 = Color(0xFFF8FAFC)
+val Slate100 = Color(0xFFF1F5F9)
+val Slate200 = Color(0xFFE2E8F0)
+val Slate300 = Color(0xFFCBD5E1)
+val Slate400 = Color(0xFF94A3B8)
+val Slate500 = Color(0xFF64748B)
+val Slate600 = Color(0xFF475569)
+val Slate700 = Color(0xFF334155)
+val Slate800 = Color(0xFF1E293B)
+val Slate900 = Color(0xFF0F172A)
+val OnlineGreen = Color(0xFF22C55E)
+val ErrorRed = Color(0xFFDC2626)
+val ErrorRedDark = Color(0xFFF87171)

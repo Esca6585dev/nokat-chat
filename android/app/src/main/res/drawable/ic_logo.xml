@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nokat Chat logo, converted 1:1 from branding/logo.svg (512x512 viewport). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group>
+        <path android:pathData="M116,0L396,0A116,116 0,0 1,512 116L512,396A116,116 0,0 1,396 512L116,512A116,116 0,0 1,0 396L0,116A116,116 0,0 1,116 0z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="512" android:endY="512">
+                    <item android:offset="0" android:color="#FF38BDF8" />
+                    <item android:offset="0.55" android:color="#FF2563EB" />
+                    <item android:offset="1" android:color="#FF1E40AF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:fillColor="#FFFFFFFF" android:pathData="M256,106c-94,0 -170,64 -170,144 0,45 24,85 62,111l-14,57c-2,8 7,14 14,9l68,-44c13,3 26,4 40,4 94,0 170,-64 170,-144S350,106 256,106z" />
+        <path android:pathData="M210,250a46,46 0,1 0,92 0a46,46 0,1 0,-92 0z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="210" android:startY="204" android:endX="302" android:endY="296">
+                    <item android:offset="0" android:color="#FF7DD3FC" />
+                    <item android:offset="1" android:color="#FF2563EB" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>

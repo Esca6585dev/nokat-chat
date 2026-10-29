@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Nokat Chat</string>
+
+    <!-- Login / OTP -->
+    <string name="login_subtitle">Telefon belgiňizi giriziň, size tassyklaýyş kodyny ibereris</string>
+    <string name="phone_label">Telefon belgi</string>
+    <string name="send_code">Kod iber</string>
+    <string name="login_footer">Dowam etmek bilen siz hyzmat şertlerini kabul edýärsiňiz</string>
+    <string name="otp_title">Kody giriziň</string>
+    <string name="otp_subtitle">%1$s belgisine 6 sanly kod iberildi</string>
+    <string name="otp_dev_code">Synag kody: %1$s</string>
+    <string name="otp_dev_code_hint">Serwer synag tertibinde işleýär. Kody doldurmak üçin basyň.</string>
+    <string name="otp_resend">Kody täzeden iber</string>
+    <string name="otp_resend_in">Kody täzeden ibermek: %1$s</string>
+    <string name="otp_code_resent">Kod täzeden iberildi</string>
+    <string name="verify">Tassykla</string>
+
+    <!-- Profile -->
+    <string name="profile_setup_title">Profiliňizi dörediň</string>
+    <string name="profile_setup_subtitle">Dostlaryňyz sizi tanar ýaly adyňyzy giriziň</string>
+    <string name="name_label">Adyňyz</string>
+    <string name="username_label">Ulanyjy ady</string>
+    <string name="username_hint">3–32 simwol: a–z, 0–9 we _</string>
+    <string name="bio_label">Özüňiz barada</string>
+    <string name="continue_btn">Dowam et</string>
+    <string name="save">Ýatda sakla</string>
+    <string name="saved">Ýatda saklandy</string>
+    <string name="profile">Profil</string>
+    <string name="settings">Sazlamalar</string>
+    <string name="logout">Çykmak</string>
+    <string name="logout_confirm_body">Hasabyňyzdan çykmak isleýärsiňizmi?</string>
+    <string name="cancel">Ýatyr</string>
+    <string name="app_version">Wersiýa %1$s</string>
+    <string name="server_label">Serwer: %1$s</string>
+
+    <!-- Chat list -->
+    <string name="chats_title">Söhbetdeşlikler</string>
+    <string name="search">Gözle</string>
+    <string name="new_chat">Täze söhbetdeşlik</string>
+    <string name="new_group">Täze topar</string>
+    <string name="more">Başgalar</string>
+    <string name="connecting">Birikdirilýär…</string>
+    <string name="you">Siz</string>
+    <string name="no_messages">Heniz hat ýok</string>
+    <string name="empty_chats_title">Heniz söhbetdeşlik ýok</string>
+    <string name="empty_chats_body">Dostlaryňyz bilen gürrüňdeşlige başlamak üçin täze söhbetdeşlik dörediň</string>
+    <string name="no_results">Hiç zat tapylmady</string>
+
+    <!-- User search / new group -->
+    <string name="search_users_hint">Ady, ulanyjy ady ýa-da belgisi</string>
+    <string name="search_users_empty">Adam tapmak üçin ady, ulanyjy adyny ýa-da telefon belgisini ýazyň</string>
+    <string name="recent_chats">Soňky söhbetdeşlikler</string>
+    <string name="group_title_label">Toparyň ady</string>
+    <string name="search_members">Agzalary gözle</string>
+    <string name="members_selected">%1$d agza saýlandy</string>
+    <string name="create">Döret</string>
+    <string name="remove">Aýyr</string>
+
+    <!-- Conversation -->
+    <string name="composer_hint">Hat ýaz…</string>
+    <string name="send">Iber</string>
+    <string name="online">onlaýn</string>
+    <string name="typing">ýazýar…</string>
+    <string name="typing_named">%1$s ýazýar…</string>
+    <string name="last_seen">soňky gezek %1$s göründi</string>
+    <string name="last_seen_recently">ýaňy-ýakynda göründi</string>
+    <string name="last_seen_today">şu gün %1$s</string>
+    <string name="last_seen_yesterday">düýn %1$s</string>
+    <string name="members_count">%1$d agza</string>
+    <string name="members_online">%1$d agza, %2$d onlaýn</string>
+    <string name="today">Şu gün</string>
+    <string name="yesterday">Düýn</string>
+    <string name="empty_conversation">Heniz hat ýok. Ilkinji bolup salam ýazyň!</string>
+    <string name="message_failed">Iberilmedi. Gaýtadan synanyşmak üçin basyň</string>
+    <string name="scroll_to_bottom">Aşak</string>
+    <string name="back">Yza</string>
+
+    <!-- Errors -->
+    <string name="error_network">Internet baglanyşygy ýok. Täzeden synanyşyň.</string>
+    <string name="error_server">Serwerde näsazlyk ýüze çykdy</string>
+    <string name="error_unknown">Näbelli ýalňyşlyk ýüze çykdy</string>
+    <string name="error_invalid_phone">Telefon belgisini doly giriziň, meselem +99365123456</string>
+    <string name="error_name_required">Adyňyzy giriziň</string>
+    <string name="error_username_invalid">Ulanyjy ady 3–32 simwoldan ybarat bolmaly (a–z, 0–9, _)</string>
+    <string name="error_username_taken">Bu ulanyjy ady eýýäm alyndy</string>
+    <string name="error_group_invalid">Toparyň adyny giriziň we iň bolmanda bir agza saýlaň</string>
+    <string name="retry">Gaýtadan synanyş</string>
+
+    <string-array name="weekdays_short">
+        <item>Duş</item>
+        <item>Siş</item>
+        <item>Çar</item>
+        <item>Pen</item>
+        <item>Ann</item>
+        <item>Şen</item>
+        <item>Ýek</item>
+    </string-array>
+
+    <string-array name="months">
+        <item>ýanwar</item>
+        <item>fewral</item>
+        <item>mart</item>
+        <item>aprel</item>
+        <item>maý</item>
+        <item>iýun</item>
+        <item>iýul</item>
+        <item>awgust</item>
+        <item>sentýabr</item>
+        <item>oktýabr</item>
+        <item>noýabr</item>
+        <item>dekabr</item>
+    </string-array>
+</resources>

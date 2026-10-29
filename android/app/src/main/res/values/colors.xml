@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nokat_primary">#FF2563EB</color>
+    <color name="nokat_primary_dark">#FF1E40AF</color>
+    <color name="nokat_sky">#FF38BDF8</color>
+    <color name="nokat_window_background">#FFF4F8FF</color>
+</resources>

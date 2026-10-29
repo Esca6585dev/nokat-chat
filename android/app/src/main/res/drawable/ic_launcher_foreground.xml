@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: white speech bubble + gradient "nokat" dot from
+     branding/logo.svg. Source coordinates are 512-based; the group scales by 0.15
+     and centres the bubble (≈51x47 units) inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.15"
+        android:scaleY="0.15"
+        android:translateX="15.6"
+        android:translateY="14.7">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M256,106c-94,0 -170,64 -170,144 0,45 24,85 62,111l-14,57c-2,8 7,14 14,9l68,-44c13,3 26,4 40,4 94,0 170,-64 170,-144S350,106 256,106z" />
+        <path android:pathData="M210,250a46,46 0,1 0,92 0a46,46 0,1 0,-92 0z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="210" android:startY="204" android:endX="302" android:endY="296">
+                    <item android:offset="0" android:color="#FF7DD3FC" />
+                    <item android:offset="1" android:color="#FF2563EB" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>

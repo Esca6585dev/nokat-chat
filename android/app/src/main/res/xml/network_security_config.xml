@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release builds: HTTPS only. The debug source set overrides this file
+     (app/src/debug/res/xml/network_security_config.xml) to allow cleartext
+     to local development hosts. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
