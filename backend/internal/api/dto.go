@@ -20,13 +20,15 @@ type UserDTO struct {
 }
 
 type MessageDTO struct {
-	ID        string    `json:"id"`
-	ChatID    string    `json:"chat_id"`
-	SenderID  string    `json:"sender_id"`
-	Text      string    `json:"text"`
-	ClientID  string    `json:"client_id,omitempty"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         string         `json:"id"`
+	ChatID     string         `json:"chat_id"`
+	SenderID   string         `json:"sender_id"`
+	Kind       string         `json:"kind"`
+	Text       string         `json:"text"`
+	Attachment *AttachmentDTO `json:"attachment"`
+	ClientID   string         `json:"client_id,omitempty"`
+	Status     string         `json:"status"`
+	CreatedAt  time.Time      `json:"created_at"`
 }
 
 type ChatDTO struct {
@@ -51,8 +53,28 @@ func (s *Server) userDTO(u models.User) UserDTO {
 	}
 }
 
+// uploadsFor loads the attachments referenced by msgs, keyed by upload ID.
+func (s *Server) uploadsFor(msgs []models.Message) map[string]models.Upload {
+	ids := make([]string, 0)
+	for _, m := range msgs {
+		if m.AttachmentID != nil {
+			ids = append(ids, *m.AttachmentID)
+		}
+	}
+	out := make(map[string]models.Upload, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	var ups []models.Upload
+	s.db.Where("id IN ?", ids).Find(&ups)
+	for _, u := range ups {
+		out[u.ID] = u
+	}
+	return out
+}
+
 // messageDTO derives the delivery status from the other members' read cursors.
-func messageDTO(m models.Message, members []models.ChatMember) MessageDTO {
+func messageDTO(m models.Message, members []models.ChatMember, uploads map[string]models.Upload) MessageDTO {
 	status := "sent"
 	for _, cm := range members {
 		if cm.UserID != m.SenderID && !cm.LastReadAt.Before(m.CreatedAt) {
@@ -60,10 +82,17 @@ func messageDTO(m models.Message, members []models.ChatMember) MessageDTO {
 			break
 		}
 	}
-	return MessageDTO{
-		ID: m.ID, ChatID: m.ChatID, SenderID: m.SenderID, Text: m.Text,
+	dto := MessageDTO{
+		ID: m.ID, ChatID: m.ChatID, SenderID: m.SenderID, Kind: "text", Text: m.Text,
 		ClientID: m.ClientID, Status: status, CreatedAt: m.CreatedAt.UTC(),
 	}
+	if m.AttachmentID != nil {
+		if u, ok := uploads[*m.AttachmentID]; ok {
+			a := attachmentDTO(u)
+			dto.Attachment, dto.Kind = &a, a.Kind
+		}
+	}
+	return dto
 }
 
 // buildChats assembles full chat views for uid with a fixed number of queries.
@@ -100,6 +129,7 @@ func (s *Server) buildChats(uid string, chatIDs []string) ([]ChatDTO, error) {
 		Scan(&last).Error; err != nil {
 		return nil, err
 	}
+	lastUploads := s.uploadsFor(last)
 	lastByChat := map[string]models.Message{}
 	for _, m := range last {
 		lastByChat[m.ChatID] = m
@@ -134,7 +164,7 @@ func (s *Server) buildChats(uid string, chatIDs []string) ([]ChatDTO, error) {
 			}
 		}
 		if m, ok := lastByChat[c.ID]; ok {
-			md := messageDTO(m, cms)
+			md := messageDTO(m, cms, lastUploads)
 			dto.LastMessage = &md
 		}
 		out = append(out, dto)

@@ -44,10 +44,24 @@ type ChatMember struct {
 }
 
 type Message struct {
-	ID        string    `gorm:"primaryKey;size:36"`
-	ChatID    string    `gorm:"size:36;not null;index:idx_chat_created,priority:1"`
-	SenderID  string    `gorm:"size:36;not null"`
-	Text      string    `gorm:"type:text;not null"`
-	ClientID  string    `gorm:"size:64"`
-	CreatedAt time.Time `gorm:"not null;index:idx_chat_created,priority:2"`
+	ID           string    `gorm:"primaryKey;size:36"`
+	ChatID       string    `gorm:"size:36;not null;index:idx_chat_created,priority:1"`
+	SenderID     string    `gorm:"size:36;not null"`
+	Text         string    `gorm:"type:text;not null"`
+	ClientID     string    `gorm:"size:64"`
+	AttachmentID *string   `gorm:"size:36;uniqueIndex"`
+	CreatedAt    time.Time `gorm:"not null;index:idx_chat_created,priority:2"`
+}
+
+// Upload is a file stored under UPLOAD_DIR, attachable to exactly one message.
+type Upload struct {
+	ID         string `gorm:"primaryKey;size:36"`
+	OwnerID    string `gorm:"size:36;not null;index"`
+	StoredName string `gorm:"size:64;not null;uniqueIndex"`
+	OrigName   string `gorm:"size:255;not null"`
+	Mime       string `gorm:"size:128;not null"`
+	Size       int64  `gorm:"not null"`
+	Width      int
+	Height     int
+	CreatedAt  time.Time
 }

@@ -3,3 +3,4 @@ nokat.db*
 *.db-shm
 .env
 /nokat-server
+uploads/

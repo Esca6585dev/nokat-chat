@@ -30,10 +30,24 @@ Single source of truth shared by `backend/` (Go Fiber), `web/` (Next.js) and `an
   "id": "uuid",
   "chat_id": "uuid",
   "sender_id": "uuid",
-  "text": "Salam!",
+  "kind": "text" | "image" | "file",
+  "text": "Salam!",          // for image/file messages this is the optional caption ("" allowed)
+  "attachment": Attachment | null,
   "client_id": "optional client-generated id, echoed back for dedupe",
   "status": "sent" | "delivered" | "read",
   "created_at": "2026-10-29T12:00:00Z"
+}
+
+// Attachment (also the response of POST /uploads)
+{
+  "id": "uuid",
+  "url": "/api/v1/files/3f2c….jpg", // ROOT-RELATIVE path: prefix with the API origin (scheme://host:port of the base URL)
+  "name": "photo.jpg",              // original file name
+  "size": 123456,                   // bytes
+  "mime": "image/jpeg",
+  "kind": "image" | "file",          // "image" only for jpeg/png/gif/webp
+  "width": 1280,                    // pixels, 0 when not an image
+  "height": 960
 }
 
 // Chat
@@ -77,7 +91,14 @@ Body `{"phone": "+99365123456", "code": "123456"}` →
 - `POST /chats/group` body `{"title": "Team", "member_ids": ["uuid", ...]}` → `Chat`
 - `GET /chats/:id` → `Chat`
 - `GET /chats/:id/messages?before=<message_id>&limit=50` → `[Message]` ordered **oldest → newest**. `before` is optional (pagination toward older messages).
-- `POST /chats/:id/messages` body `{"text": "...", "client_id": "optional"}` → `Message` (also broadcast over WebSocket to all members, including the sender's other sessions).
+- `POST /chats/:id/messages` body `{"text": "...", "client_id": "optional", "attachment_id": "optional"}` → `Message` (also broadcast over WebSocket to all members, including the sender's other sessions). `text` may be empty when `attachment_id` is set; the attachment must have been uploaded by the caller and not already used.
+
+## Uploads (photos & files)
+
+- `POST /uploads` — `multipart/form-data` with one field `file`. Max **20 MB** (`413` otherwise). → `201 Attachment`.
+  Flow: upload first, then send a message with `attachment_id`. An attachment can be attached to one message only.
+- `GET /files/:name` — **public, no auth** (names are unguessable random UUIDs), so `<img src>` / Coil can load directly.
+  Images (`kind: image`) are served inline; everything else with `Content-Disposition: attachment; filename="<name>"`. Cached for 1 year (immutable).
 - `POST /chats/:id/read` body `{}` → `{"ok": true}` — marks everything in the chat as read for the caller.
 
 ## WebSocket — `GET /ws?token=<jwt>`
@@ -99,7 +120,7 @@ Client → server:
 
 | type | data |
 |---|---|
-| `message.send` | `{"chat_id", "text", "client_id"}` — same effect as the REST endpoint |
+| `message.send` | `{"chat_id", "text", "client_id", "attachment_id"?}` — same effect as the REST endpoint |
 | `typing` | `{"chat_id", "typing": true\|false}` |
 | `read` | `{"chat_id"}` |
 | `ping` | `{}` — send every ~25 s |

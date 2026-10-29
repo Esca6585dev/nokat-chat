@@ -36,7 +36,7 @@ func NewServer(cfg config.Config, db *gorm.DB, h *hub.Hub, sms auth.SMSSender) *
 func (s *Server) App() *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName:      "Nokat Chat API",
-		BodyLimit:    1 << 20,
+		BodyLimit:    21 << 20, // 20 MB uploads + multipart overhead
 		ErrorHandler: errorHandler,
 	})
 	app.Use(recover.New(), logger.New(logger.Config{Format: "${time} ${status} ${method} ${path} ${latency}\n"}))
@@ -53,12 +53,16 @@ func (s *Server) App() *fiber.App {
 	authG.Post("/otp/request", s.requestOTP)
 	authG.Post("/otp/verify", s.verifyOTP)
 
+	v1.Get("/files/:name", s.serveFile)
+
 	v1.Use("/ws", s.wsAuth)
 	v1.Get("/ws", websocket.New(s.wsHandler))
 
 	p := v1.Group("", s.requireAuth)
 	p.Get("/me", s.getMe)
 	p.Patch("/me", s.updateMe)
+	p.Post("/uploads", limiter.New(limiter.Config{Max: 60, Expiration: time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string { return uid(c) }}), s.upload)
 	p.Get("/users/search", s.searchUsers)
 	p.Get("/users/:id", s.getUser)
 	p.Get("/chats", s.listChats)

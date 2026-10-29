@@ -182,22 +182,24 @@ func (s *Server) listMessages(c *fiber.Ctx) error {
 	}
 	var members []models.ChatMember
 	s.db.Where("chat_id = ?", chatID).Find(&members)
+	uploads := s.uploadsFor(msgs)
 	out := make([]MessageDTO, len(msgs))
 	for i, m := range msgs {
-		out[len(msgs)-1-i] = messageDTO(m, members) // oldest → newest
+		out[len(msgs)-1-i] = messageDTO(m, members, uploads) // oldest → newest
 	}
 	return c.JSON(out)
 }
 
 func (s *Server) postMessage(c *fiber.Ctx) error {
 	var body struct {
-		Text     string `json:"text"`
-		ClientID string `json:"client_id"`
+		Text         string `json:"text"`
+		ClientID     string `json:"client_id"`
+		AttachmentID string `json:"attachment_id"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return bad("nädogry sorag")
 	}
-	msg, err := s.sendMessage(uid(c), c.Params("id"), body.Text, body.ClientID)
+	msg, err := s.sendMessage(uid(c), c.Params("id"), body.Text, body.ClientID, body.AttachmentID)
 	if err != nil {
 		return err
 	}
@@ -227,9 +229,9 @@ func (s *Server) memberIDs(chatID string) []string {
 }
 
 // sendMessage is shared by REST and WebSocket so both paths behave identically.
-func (s *Server) sendMessage(senderID, chatID, text, clientID string) (MessageDTO, error) {
+func (s *Server) sendMessage(senderID, chatID, text, clientID, attachmentID string) (MessageDTO, error) {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" && attachmentID == "" {
 		return MessageDTO{}, bad("hat boş")
 	}
 	if utf8.RuneCountInString(text) > maxMessageLen {
@@ -249,15 +251,31 @@ func (s *Server) sendMessage(senderID, chatID, text, clientID string) (MessageDT
 	if clientID != "" {
 		var dup models.Message
 		if err := s.db.First(&dup, "chat_id = ? AND sender_id = ? AND client_id = ?", chatID, senderID, clientID).Error; err == nil {
-			return messageDTO(dup, members), nil
+			return messageDTO(dup, members, s.uploadsFor([]models.Message{dup})), nil
 		}
+	}
+
+	uploads := map[string]models.Upload{}
+	var attachment *string
+	if attachmentID != "" {
+		var up models.Upload
+		if err := s.db.First(&up, "id = ? AND owner_id = ?", attachmentID, senderID).Error; err != nil {
+			return MessageDTO{}, bad("faýl tapylmady")
+		}
+		var used int64
+		s.db.Model(&models.Message{}).Where("attachment_id = ?", up.ID).Count(&used)
+		if used > 0 {
+			return MessageDTO{}, bad("bu faýl eýýäm iberildi")
+		}
+		uploads[up.ID] = up
+		attachment = &up.ID
 	}
 
 	var prior int64
 	s.db.Model(&models.Message{}).Where("chat_id = ?", chatID).Count(&prior)
 
 	now := time.Now().UTC()
-	msg := models.Message{ID: uuid.NewString(), ChatID: chatID, SenderID: senderID, Text: text, ClientID: clientID, CreatedAt: now}
+	msg := models.Message{ID: uuid.NewString(), ChatID: chatID, SenderID: senderID, Text: text, ClientID: clientID, AttachmentID: attachment, CreatedAt: now}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&msg).Error; err != nil {
 			return err
@@ -288,7 +306,7 @@ func (s *Server) sendMessage(senderID, chatID, text, clientID string) (MessageDT
 			}
 		}
 	}
-	dto := messageDTO(msg, members)
+	dto := messageDTO(msg, members, uploads)
 	s.hub.SendTo(ids, hub.Event{Type: "message.new", Data: dto})
 	return dto, nil
 }

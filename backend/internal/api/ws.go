@@ -84,6 +84,7 @@ func (s *Server) handleInbound(c *hub.Client, in inbound) {
 		Text     string `json:"text"`
 		ClientID string `json:"client_id"`
 		Typing   bool   `json:"typing"`
+		AttachID string `json:"attachment_id"`
 	}
 	_ = json.Unmarshal(in.Data, &d)
 	switch in.Type {
@@ -93,7 +94,7 @@ func (s *Server) handleInbound(c *hub.Client, in inbound) {
 		default:
 		}
 	case "message.send":
-		if _, err := s.sendMessage(c.UserID, d.ChatID, d.Text, d.ClientID); err != nil {
+		if _, err := s.sendMessage(c.UserID, d.ChatID, d.Text, d.ClientID, d.AttachID); err != nil {
 			log.Printf("ws message.send from %s: %v", c.UserID, err)
 		}
 	case "typing":

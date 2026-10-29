@@ -27,5 +27,9 @@ internal/hub      in-memory WebSocket connection hub (multi-device per user)
 internal/api      HTTP handlers, DTOs, WebSocket protocol
 ```
 
+Uploads (photos & files, max 20 MB) are stored in `UPLOAD_DIR` (default `./uploads`) and served at
+`/api/v1/files/<random-name>`. Only JPEG/PNG/GIF/WebP render inline; every other file is served as a
+download with `nosniff` and a sandbox CSP, so uploaded HTML/SVG cannot run scripts.
+
 Security notes: OTP codes are stored only as HMAC hashes, expire after 2 minutes, allow 5 attempts,
 and can be re-requested every 30 s; `/auth/*` is additionally rate-limited per IP.

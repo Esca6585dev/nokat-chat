@@ -18,6 +18,8 @@ type Config struct {
 	OTPResend     time.Duration
 	OTPMaxTries   int
 	SMSWebhookURL string // optional: POST {"phone","text"} to an SMS gateway
+	UploadDir     string
+	MaxUpload     int64
 }
 
 func Load() Config {
@@ -33,6 +35,8 @@ func Load() Config {
 		OTPResend:     30 * time.Second,
 		OTPMaxTries:   5,
 		SMSWebhookURL: env("SMS_WEBHOOK_URL", ""),
+		UploadDir:     env("UPLOAD_DIR", "uploads"),
+		MaxUpload:     20 << 20,
 	}
 }
 

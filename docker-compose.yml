@@ -20,6 +20,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       OTP_DEV_MODE: ${OTP_DEV_MODE:-true}
       SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      UPLOAD_DIR: /data/uploads
+    volumes: [uploads:/data]
     ports: ["8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -34,3 +36,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:

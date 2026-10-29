@@ -37,6 +37,6 @@ func Open(driver, dsn string) (*gorm.DB, error) {
 		}
 		sqlDB.SetMaxOpenConns(1)
 	}
-	err = db.AutoMigrate(&models.User{}, &models.OTPCode{}, &models.Chat{}, &models.ChatMember{}, &models.Message{})
+	err = db.AutoMigrate(&models.User{}, &models.OTPCode{}, &models.Chat{}, &models.ChatMember{}, &models.Message{}, &models.Upload{})
 	return db, err
 }

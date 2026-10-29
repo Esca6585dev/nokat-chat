@@ -9,6 +9,7 @@ FROM alpine:3.20
 RUN adduser -D -H nokat && mkdir /data && chown nokat /data
 USER nokat
 COPY --from=build /out/nokat-server /usr/local/bin/nokat-server
-ENV ADDR=:8080 DB_DRIVER=sqlite DB_DSN=/data/nokat.db
+ENV ADDR=:8080 DB_DRIVER=sqlite DB_DSN=/data/nokat.db UPLOAD_DIR=/data/uploads
+VOLUME /data
 EXPOSE 8080
 CMD ["nokat-server"]

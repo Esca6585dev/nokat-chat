@@ -15,6 +15,7 @@
 - Registration / login by phone number + 6-digit SMS OTP (dev mode shows the code)
 - Profile setup (name, @username, bio)
 - Direct chats and groups, user search by name / username / phone
+- Photo and file sharing (up to 20 MB) with previews, upload progress and a fullscreen viewer
 - Realtime messages over WebSocket, multi-device per user
 - Typing indicator, online / last-seen presence, ✓ sent / ✓✓ read receipts, unread counters
 - Message history with pagination, optimistic sending with dedupe (`client_id`)
