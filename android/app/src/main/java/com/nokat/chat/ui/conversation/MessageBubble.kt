@@ -1,5 +1,6 @@
 package com.nokat.chat.ui.conversation
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -7,28 +8,39 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.nokat.chat.R
 import com.nokat.chat.data.model.Message
 import com.nokat.chat.ui.common.MessageTicks
@@ -37,16 +49,33 @@ import com.nokat.chat.ui.theme.NokatTheme
 
 private val BubbleRadius = 18.dp
 private val TailRadius = 5.dp
+private val ImageMaxWidth = 260.dp
+private val MediaCorner = 14.dp
 
+/**
+ * One chat bubble: text, photo (+ optional caption) or file card (+ optional caption).
+ *
+ * [progress] is only invoked for pending attachment messages, so upload progress ticks
+ * recompose just the uploading bubble.
+ */
 @Composable
 fun MessageBubble(
     item: ConvItem.Msg,
+    progress: () -> Float?,
     onRetry: (Message) -> Unit,
+    onOpenImage: (AttachmentUi) -> Unit,
+    onOpenFile: (AttachmentUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = NokatTheme.colors
     val message = item.message
     val outgoing = item.outgoing
+    val attachment = item.attachment
+    val isImage = attachment?.isImage == true
+    val hasCaption = message.text.isNotBlank()
+    val uploading = attachment != null && message.isPending && !message.failed
+    val uploadFraction = if (uploading) progress() else null
+
     val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.8f).dp
     val shape = remember(outgoing, item.lastInRun) {
         RoundedCornerShape(
@@ -58,15 +87,7 @@ fun MessageBubble(
     }
     val textColor = if (outgoing) colors.onOutgoingBubble else colors.onIncomingBubble
     val metaColor = if (outgoing) colors.outgoingMeta else colors.incomingMeta
-
-    // Invisible trailing placeholder reserves room for the time/ticks overlay on the last line.
-    val placeholder = "  " + item.time + if (outgoing) "   " else ""
-    val body = remember(message.text, placeholder) {
-        buildAnnotatedString {
-            append(message.text)
-            withStyle(SpanStyle(color = Color.Transparent, fontSize = 12.sp)) { append(placeholder) }
-        }
-    }
+    val retry = { onRetry(message) }
 
     Row(
         modifier = modifier
@@ -84,8 +105,14 @@ fun MessageBubble(
             .shadow(elevation = if (outgoing) 0.dp else 0.5.dp, shape = shape, clip = false)
             .clip(shape)
             .let { if (outgoing) it.background(colors.outgoingBubble) else it.background(colors.incomingBubble) }
-            .let { if (message.failed) it.clickable { onRetry(message) } else it }
-            .padding(start = 12.dp, end = 10.dp, top = 7.dp, bottom = 6.dp)
+            .let { if (message.failed && attachment == null) it.clickable(onClick = retry) else it }
+            .let {
+                when {
+                    isImage -> it.padding(3.dp)
+                    attachment != null -> it.padding(start = 8.dp, end = 10.dp, top = 8.dp, bottom = 6.dp)
+                    else -> it.padding(start = 12.dp, end = 10.dp, top = 7.dp, bottom = 6.dp)
+                }
+            }
 
         Column(bubbleModifier) {
             if (item.senderName != null) {
@@ -95,42 +122,282 @@ fun MessageBubble(
                     fontWeight = FontWeight.SemiBold,
                     color = avatarAccent(item.senderSeed),
                     maxLines = 1,
+                    modifier = if (isImage) Modifier.padding(start = 9.dp, end = 9.dp, top = 4.dp, bottom = 4.dp) else Modifier,
                 )
             }
-            Box {
-                Text(
-                    text = body,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = textColor,
+
+            val meta: @Composable (Color) -> Unit = { tint ->
+                MetaRow(
+                    time = item.time,
+                    message = message,
+                    outgoing = outgoing,
+                    tint = tint,
+                    readTint = colors.readTickOnBubble,
                 )
-                Row(
-                    modifier = Modifier.align(Alignment.BottomEnd),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = item.time,
-                        fontSize = 11.sp,
-                        color = metaColor,
-                        maxLines = 1,
+            }
+
+            when {
+                attachment != null && isImage -> {
+                    val overlay: (@Composable () -> Unit)? = if (hasCaption) {
+                        null
+                    } else {
+                        { meta(Color.White) }
+                    }
+                    ImageContent(
+                        attachment = attachment,
+                        width = minOf(ImageMaxWidth, maxWidth - 6.dp),
+                        uploading = uploading,
+                        progress = uploadFraction,
+                        onClick = { if (message.failed) retry() else onOpenImage(attachment) },
+                        overlay = overlay,
                     )
-                    if (outgoing) {
-                        Spacer(Modifier.width(3.dp))
-                        MessageTicks(
-                            status = message.status,
-                            failed = message.failed,
-                            tint = metaColor,
-                            readTint = colors.readTickOnBubble,
+                    if (hasCaption) {
+                        TextWithMeta(
+                            text = message.text,
+                            time = item.time,
+                            outgoing = outgoing,
+                            textColor = textColor,
+                            modifier = Modifier.padding(start = 9.dp, end = 7.dp, top = 5.dp, bottom = 3.dp),
+                            meta = { meta(metaColor) },
                         )
                     }
                 }
+                attachment != null -> {
+                    FileContent(
+                        attachment = attachment,
+                        outgoing = outgoing,
+                        textColor = textColor,
+                        metaColor = metaColor,
+                        uploading = uploading,
+                        progress = uploadFraction,
+                        onClick = { if (message.failed) retry() else onOpenFile(attachment) },
+                    )
+                    if (hasCaption) {
+                        TextWithMeta(
+                            text = message.text,
+                            time = item.time,
+                            outgoing = outgoing,
+                            textColor = textColor,
+                            modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+                            meta = { meta(metaColor) },
+                        )
+                    } else {
+                        Box(
+                            Modifier
+                                .align(Alignment.End)
+                                .padding(top = 2.dp),
+                        ) { meta(metaColor) }
+                    }
+                }
+                else -> TextWithMeta(
+                    text = message.text,
+                    time = item.time,
+                    outgoing = outgoing,
+                    textColor = textColor,
+                    meta = { meta(metaColor) },
+                )
             }
+
             if (message.failed) {
                 Text(
                     text = stringResource(R.string.message_failed),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (outgoing) Color.White else MaterialTheme.colorScheme.error,
+                    modifier = if (attachment != null) Modifier.padding(horizontal = 6.dp, vertical = 3.dp) else Modifier,
                 )
             }
+        }
+    }
+}
+
+/** Text with the time/ticks overlaid on its last line (an invisible placeholder reserves the room). */
+@Composable
+private fun TextWithMeta(
+    text: String,
+    time: String,
+    outgoing: Boolean,
+    textColor: Color,
+    meta: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val placeholder = "  " + time + if (outgoing) "   " else ""
+    val body = remember(text, placeholder) {
+        buildAnnotatedString {
+            append(text)
+            withStyle(SpanStyle(color = Color.Transparent, fontSize = 12.sp)) { append(placeholder) }
+        }
+    }
+    Box(modifier) {
+        Text(
+            text = body,
+            style = MaterialTheme.typography.bodyLarge,
+            color = textColor,
+        )
+        Box(Modifier.align(Alignment.BottomEnd)) { meta() }
+    }
+}
+
+@Composable
+private fun MetaRow(
+    time: String,
+    message: Message,
+    outgoing: Boolean,
+    tint: Color,
+    readTint: Color,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = time,
+            fontSize = 11.sp,
+            color = tint,
+            maxLines = 1,
+        )
+        if (outgoing) {
+            Spacer(Modifier.width(3.dp))
+            MessageTicks(
+                status = message.status,
+                failed = message.failed,
+                tint = tint,
+                readTint = readTint,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImageContent(
+    attachment: AttachmentUi,
+    width: Dp,
+    uploading: Boolean,
+    progress: Float?,
+    onClick: () -> Unit,
+    overlay: (@Composable () -> Unit)?,
+) {
+    val ratio = if (attachment.width > 0 && attachment.height > 0) {
+        (attachment.width.toFloat() / attachment.height).coerceIn(0.6f, 1.9f)
+    } else {
+        1f
+    }
+    Box(
+        modifier = Modifier
+            .width(width)
+            .aspectRatio(ratio)
+            .clip(RoundedCornerShape(MediaCorner))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick),
+    ) {
+        AsyncImage(
+            model = attachment.previewModel,
+            contentDescription = attachment.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.matchParentSize(),
+        )
+        if (uploading) {
+            UploadIndicator(
+                progress = progress,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(52.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                size = 40.dp,
+            )
+        }
+        if (overlay != null) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
+            ) { overlay() }
+        }
+    }
+}
+
+@Composable
+private fun FileContent(
+    attachment: AttachmentUi,
+    outgoing: Boolean,
+    textColor: Color,
+    metaColor: Color,
+    uploading: Boolean,
+    progress: Float?,
+    onClick: () -> Unit,
+) {
+    val iconBackground = if (outgoing) Color.White.copy(alpha = 0.22f) else MaterialTheme.colorScheme.primary
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .background(iconBackground, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (uploading) {
+                UploadIndicator(progress = progress, modifier = Modifier, size = 38.dp)
+            } else {
+                Icon(
+                    painter = painterResource(
+                        if (attachment.remoteUrl != null) R.drawable.ic_download else R.drawable.ic_file,
+                    ),
+                    contentDescription = stringResource(R.string.open_file),
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.widthIn(max = 200.dp)) {
+            Text(
+                text = attachment.name,
+                style = MaterialTheme.typography.titleSmall,
+                color = textColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (attachment.sizeText.isNotEmpty() || uploading) {
+                Text(
+                    text = if (uploading && progress != null && attachment.sizeText.isNotEmpty()) {
+                        "${(progress * 100).toInt()}% · ${attachment.sizeText}"
+                    } else if (uploading) {
+                        stringResource(R.string.uploading)
+                    } else {
+                        attachment.sizeText
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = metaColor,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** White circular progress: determinate when [progress] is known, else indeterminate. */
+@Composable
+private fun UploadIndicator(progress: Float?, modifier: Modifier, size: Dp) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        if (progress == null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(size),
+                color = Color.White,
+                strokeWidth = 3.dp,
+            )
+        } else {
+            val animated by animateFloatAsState(targetValue = progress, label = "uploadProgress")
+            CircularProgressIndicator(
+                progress = { animated },
+                modifier = Modifier.size(size),
+                color = Color.White,
+                strokeWidth = 3.dp,
+                trackColor = Color.White.copy(alpha = 0.25f),
+            )
         }
     }
 }

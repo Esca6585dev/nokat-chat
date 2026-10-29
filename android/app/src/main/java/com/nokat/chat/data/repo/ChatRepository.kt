@@ -1,19 +1,25 @@
 package com.nokat.chat.data.repo
 
+import android.content.ContentResolver
+import android.net.Uri
+import com.nokat.chat.data.model.Attachment
 import com.nokat.chat.data.model.Chat
 import com.nokat.chat.data.model.DirectChatRequest
 import com.nokat.chat.data.model.GroupChatRequest
+import com.nokat.chat.data.model.LocalFile
 import com.nokat.chat.data.model.Message
 import com.nokat.chat.data.model.MessageStatus
 import com.nokat.chat.data.model.SendMessageRequest
 import com.nokat.chat.data.realtime.RealtimeClient
 import com.nokat.chat.data.realtime.WsEvent
+import com.nokat.chat.data.remote.ContentUriRequestBody
 import com.nokat.chat.data.remote.NokatApi
 import com.nokat.chat.data.remote.decodeList
 import com.nokat.chat.data.session.SessionManager
 import com.nokat.chat.util.Timestamps
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -25,6 +31,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -37,6 +45,7 @@ class ChatRepository(
     private val realtime: RealtimeClient,
     private val session: SessionManager,
     private val scope: CoroutineScope,
+    private val contentResolver: ContentResolver,
 ) {
     private val _chats = MutableStateFlow<List<Chat>>(emptyList())
     val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
@@ -88,10 +97,31 @@ class ChatRepository(
      * POST /chats/:id/messages. Runs in the application scope so leaving the screen does not
      * cancel an in-flight send.
      */
-    suspend fun sendMessage(chatId: String, text: String, clientId: String): Message =
-        scope.async { api.sendMessage(chatId, SendMessageRequest(text, clientId)) }
+    suspend fun sendMessage(
+        chatId: String,
+        text: String,
+        clientId: String,
+        attachmentId: String? = null,
+    ): Message =
+        scope.async { api.sendMessage(chatId, SendMessageRequest(text, clientId, attachmentId)) }
             .await()
             .also { onMessage(it) }
+
+    /**
+     * POST /uploads (multipart field `file`), streaming from the ContentResolver.
+     * [onProgress] is called with 0..1 from an OkHttp thread.
+     */
+    suspend fun uploadAttachment(file: LocalFile, onProgress: (Float) -> Unit): Attachment =
+        scope.async(Dispatchers.IO) {
+            val body = ContentUriRequestBody(
+                resolver = contentResolver,
+                uri = Uri.parse(file.uri),
+                mediaType = file.mime.toMediaTypeOrNull(),
+                length = file.size,
+                onProgress = onProgress,
+            )
+            api.upload(MultipartBody.Part.createFormData("file", file.name, body))
+        }.await()
 
     fun markRead(chatId: String) {
         _chats.update { list -> list.map { if (it.id == chatId && it.unreadCount != 0) it.copy(unreadCount = 0) else it } }

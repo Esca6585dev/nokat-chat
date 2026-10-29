@@ -1,11 +1,12 @@
 "use client";
 
 import { create } from "zustand";
-import { api } from "./api";
+import { api, ApiError, MAX_UPLOAD_BYTES, normalizeChat, normalizeMessage, uploadFile, type UploadHandle } from "./api";
+import { t } from "./i18n";
 import { cacheUser, getCachedUser, getToken } from "./auth";
 import { newClientId } from "./format";
 import { RealtimeClient, type WsStatus } from "./ws";
-import type { Chat, ID, Message, MessageStatus, ServerEvent, UIMessage, User } from "@/types";
+import type { Attachment, Chat, ID, Message, MessageStatus, ServerEvent, UIMessage, User } from "@/types";
 
 const PAGE_SIZE = 50;
 const TYPING_TTL = 6_000;
@@ -29,6 +30,12 @@ interface State {
   typing: Record<ID, ID[]>;
   wsStatus: WsStatus;
   focused: boolean;
+  toast: { id: number; text: string } | null;
+  lightbox: { url: string; name: string } | null;
+
+  showToast: (text: string) => void;
+  openLightbox: (url: string, name: string) => void;
+  closeLightbox: () => void;
 
   init: () => void;
   teardown: () => void;
@@ -39,6 +46,10 @@ interface State {
   loadMessages: (chatId: ID) => Promise<void>;
   loadOlder: (chatId: ID) => Promise<void>;
   send: (chatId: ID, text: string) => Promise<void>;
+  /** Optimistically send a photo/file (upload with progress, then POST message with attachment_id). */
+  sendAttachment: (chatId: ID, file: File, caption: string, meta?: LocalFileMeta) => void;
+  /** Abort an in-flight upload (or discard a failed one) and drop its optimistic bubble. */
+  cancelSend: (chatId: ID, clientId: string) => void;
   retry: (chatId: ID, clientId: string) => Promise<void>;
   markRead: (chatId: ID) => void;
   sendTyping: (chatId: ID, typing: boolean) => void;
@@ -47,6 +58,15 @@ interface State {
   createGroup: (title: string, memberIds: ID[]) => Promise<Chat>;
   handleEvent: (ev: ServerEvent) => void;
 }
+
+export interface LocalFileMeta {
+  previewUrl?: string;
+  width?: number;
+  height?: number;
+}
+
+const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+export const isImageFile = (f: { type: string }) => IMAGE_MIMES.has(f.type);
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -77,8 +97,10 @@ function mergeMessage(items: UIMessage[], msg: UIMessage): UIMessage[] {
       ...prev,
       ...msg,
       status: maxStatus(prev.status, msg.status),
-      // keep the optimistic timestamp ordering stable if the server echoes later
       local: msg.local,
+      upload: msg.upload,
+      // keep the local object URL so the image doesn't flicker when the server copy arrives
+      localPreview: msg.localPreview ?? prev.localPreview,
     };
     const copy = items.slice();
     copy[idx] = next;
@@ -102,9 +124,6 @@ function sortChats(chats: Chat[]): Chat[] {
   return chats.slice().sort((a, b) => ts(b.updated_at) - ts(a.updated_at));
 }
 
-function normalizeChat(c: Chat): Chat {
-  return { ...c, members: c.members ?? [], unread_count: c.unread_count ?? 0, last_message: c.last_message ?? null };
-}
 
 const emptyMessages = (): ChatMessages => ({
   items: [],
@@ -120,6 +139,20 @@ let rt: RealtimeClient | null = null;
 const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastReadSent = new Map<ID, number>();
 const pendingChatFetch = new Set<ID>();
+let toastSeq = 0;
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Optimistic sends in flight (or failed), keyed by client_id. */
+interface PendingSend {
+  chatId: ID;
+  text: string;
+  file?: File;
+  attachmentId?: ID;
+  upload?: UploadHandle;
+  cancelled?: boolean;
+}
+const pending = new Map<string, PendingSend>();
+const objectUrls = new Set<string>();
 
 export const useChatStore = create<State>()((set, get) => {
   const patchChat = (chatId: ID, fn: (c: Chat) => Chat) =>
@@ -182,6 +215,49 @@ export const useChatStore = create<State>()((set, get) => {
     }
   };
 
+  const setLocal = (chatId: ID, clientId: string, patch: Partial<UIMessage>) =>
+    patchMessages(chatId, (m) => ({
+      ...m,
+      items: m.items.map((x) => (x.client_id === clientId && x.local ? { ...x, ...patch } : x)),
+    }));
+
+  /** Upload (if needed) then POST the message; marks the optimistic bubble failed on error. */
+  const deliver = async (clientId: string) => {
+    const rec = pending.get(clientId);
+    if (!rec) return;
+    const { chatId } = rec;
+    setLocal(chatId, clientId, { local: "sending", ...(rec.file && !rec.attachmentId ? { upload: { progress: 0 } } : {}) });
+    try {
+      if (rec.file && !rec.attachmentId) {
+        let last = 0;
+        const handle = uploadFile(rec.file, (p) => {
+          if (p - last >= 0.01 || p === 1) {
+            last = p;
+            setLocal(chatId, clientId, { upload: { progress: p } });
+          }
+        });
+        rec.upload = handle;
+        const att = await handle.promise;
+        rec.upload = undefined;
+        rec.attachmentId = att.id;
+        if (rec.cancelled) return;
+        setLocal(chatId, clientId, { attachment: att, upload: undefined });
+      }
+      if (rec.cancelled) return;
+      const saved = await api.sendMessage(chatId, rec.text, clientId, rec.attachmentId);
+      pending.delete(clientId);
+      const merged: UIMessage = { ...saved, client_id: saved.client_id || clientId, local: undefined, upload: undefined };
+      patchMessages(chatId, (m) => ({ ...m, items: mergeMessage(m.items, merged) }));
+      applyToChat(merged, false);
+    } catch (e) {
+      rec.upload = undefined;
+      if (rec.cancelled || (e instanceof ApiError && e.status === -1)) return;
+      if (e instanceof ApiError && e.status === 413) get().showToast(t.fileTooLarge);
+      else if (rec.file && !rec.attachmentId) get().showToast(t.uploadFailed);
+      setLocal(chatId, clientId, { local: "failed", upload: undefined });
+    }
+  };
+
   const isViewing = (chatId: ID) => {
     const s = get();
     return s.activeChatId === chatId && s.focused;
@@ -196,6 +272,16 @@ export const useChatStore = create<State>()((set, get) => {
     typing: {},
     wsStatus: "idle",
     focused: true,
+    toast: null,
+    lightbox: null,
+
+    showToast: (text) => {
+      if (toastTimer) clearTimeout(toastTimer);
+      set({ toast: { id: ++toastSeq, text } });
+      toastTimer = setTimeout(() => set({ toast: null }), 3500);
+    },
+    openLightbox: (url, name) => set({ lightbox: { url, name } }),
+    closeLightbox: () => set({ lightbox: null }),
 
     init: () => {
       const token = getToken();
@@ -238,7 +324,13 @@ export const useChatStore = create<State>()((set, get) => {
       typingTimers.forEach((t) => clearTimeout(t));
       typingTimers.clear();
       lastReadSent.clear();
+      pending.forEach((p) => p.upload?.abort());
+      pending.clear();
+      objectUrls.forEach((u) => URL.revokeObjectURL(u));
+      objectUrls.clear();
       set({
+        toast: null,
+        lightbox: null,
         me: null,
         chats: [],
         chatsLoaded: false,
@@ -327,7 +419,9 @@ export const useChatStore = create<State>()((set, get) => {
         id: clientId,
         chat_id: chatId,
         sender_id: me.id,
+        kind: "text",
         text: body,
+        attachment: null,
         client_id: clientId,
         status: "sent",
         created_at: new Date().toISOString(),
@@ -336,40 +430,80 @@ export const useChatStore = create<State>()((set, get) => {
       patchMessages(chatId, (m) => ({ ...m, items: mergeMessage(m.items, optimistic) }));
       applyToChat(optimistic, false);
       rt?.send({ type: "typing", data: { chat_id: chatId, typing: false } });
-      try {
-        const saved = await api.sendMessage(chatId, body, clientId);
-        const merged: UIMessage = { ...saved, client_id: saved.client_id || clientId, local: undefined };
-        patchMessages(chatId, (m) => ({ ...m, items: mergeMessage(m.items, merged) }));
-        applyToChat(merged, false);
-      } catch {
-        patchMessages(chatId, (m) => ({
-          ...m,
-          items: m.items.map((x) => (x.client_id === clientId && x.local ? { ...x, local: "failed" } : x)),
-        }));
+      pending.set(clientId, { chatId, text: body });
+      await deliver(clientId);
+    },
+
+    sendAttachment: (chatId, file, caption, meta = {}) => {
+      const me = get().me;
+      if (!me) return;
+      if (file.size > MAX_UPLOAD_BYTES) {
+        get().showToast(t.fileTooLarge);
+        return;
       }
+      const clientId = newClientId();
+      const image = isImageFile(file);
+      if (meta.previewUrl) objectUrls.add(meta.previewUrl);
+      const localAttachment: Attachment = {
+        id: "",
+        url: "",
+        name: file.name || (image ? "image" : "file"),
+        size: file.size,
+        mime: file.type || "application/octet-stream",
+        kind: image ? "image" : "file",
+        width: meta.width ?? 0,
+        height: meta.height ?? 0,
+      };
+      const body = caption.trim();
+      const optimistic: UIMessage = {
+        id: clientId,
+        chat_id: chatId,
+        sender_id: me.id,
+        kind: image ? "image" : "file",
+        text: body,
+        attachment: localAttachment,
+        client_id: clientId,
+        status: "sent",
+        created_at: new Date().toISOString(),
+        local: "sending",
+        localPreview: meta.previewUrl,
+        upload: { progress: 0 },
+      };
+      patchMessages(chatId, (m) => ({ ...m, items: mergeMessage(m.items, optimistic) }));
+      applyToChat(optimistic, false);
+      pending.set(clientId, { chatId, text: body, file });
+      void deliver(clientId);
+    },
+
+    cancelSend: (chatId, clientId) => {
+      const rec = pending.get(clientId);
+      if (rec) {
+        rec.cancelled = true;
+        rec.upload?.abort();
+        pending.delete(clientId);
+      }
+      const removed = get().messages[chatId]?.items.find((x) => x.client_id === clientId && x.local);
+      if (!removed) return;
+      patchMessages(chatId, (m) => ({ ...m, items: m.items.filter((x) => x !== removed) }));
+      // Restore the chat preview to the newest remaining message.
+      const items = get().messages[chatId]?.items ?? [];
+      const lastLeft = items[items.length - 1] ?? null;
+      patchChat(chatId, (c) =>
+        c.last_message && (c.last_message.client_id === clientId || c.last_message.id === clientId)
+          ? { ...c, last_message: lastLeft }
+          : c,
+      );
     },
 
     retry: async (chatId, clientId) => {
-      const m = get().messages[chatId];
-      const msg = m?.items.find((x) => x.client_id === clientId && x.local === "failed");
+      const msg = get().messages[chatId]?.items.find((x) => x.client_id === clientId && x.local === "failed");
       if (!msg) return;
-      patchMessages(chatId, (x) => ({
-        ...x,
-        items: x.items.map((i) => (i.client_id === clientId ? { ...i, local: "sending" } : i)),
-      }));
-      try {
-        const saved = await api.sendMessage(chatId, msg.text, clientId);
-        patchMessages(chatId, (x) => ({
-          ...x,
-          items: mergeMessage(x.items, { ...saved, client_id: saved.client_id || clientId, local: undefined }),
-        }));
-        applyToChat(saved, false);
-      } catch {
-        patchMessages(chatId, (x) => ({
-          ...x,
-          items: x.items.map((i) => (i.client_id === clientId && i.local ? { ...i, local: "failed" } : i)),
-        }));
+      if (!pending.has(clientId)) {
+        // Text messages can always be re-sent; attachments need the original File.
+        if (msg.kind !== "text") return;
+        pending.set(clientId, { chatId, text: msg.text });
       }
+      await deliver(clientId);
     },
 
     markRead: (chatId) => {
@@ -416,7 +550,7 @@ export const useChatStore = create<State>()((set, get) => {
       const me = get().me;
       switch (ev.type) {
         case "message.new": {
-          const msg = ev.data;
+          const msg = normalizeMessage(ev.data);
           const mine = !!me && msg.sender_id === me.id;
           if (get().messages[msg.chat_id]) {
             patchMessages(msg.chat_id, (m) => ({ ...m, items: mergeMessage(m.items, { ...msg, local: undefined }) }));

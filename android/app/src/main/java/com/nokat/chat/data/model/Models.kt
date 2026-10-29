@@ -28,14 +28,55 @@ data class Message(
     @SerialName("client_id") val clientId: String? = null,
     val status: String = MessageStatus.SENT,
     @SerialName("created_at") val createdAt: String = "",
+    /** "text" | "image" | "file". Defaults to text for older servers. */
+    val kind: String = MessageKind.TEXT,
+    val attachment: Attachment? = null,
     /** Local-only: optimistic message whose delivery failed. */
     @Transient val failed: Boolean = false,
+    /** Local-only: the picked file behind an optimistic attachment message (kept for preview/retry). */
+    @Transient val localFile: LocalFile? = null,
 ) {
     val isPending: Boolean get() = status == MessageStatus.SENDING
+
+    val isImage: Boolean get() = kind == MessageKind.IMAGE
+    val isFile: Boolean get() = kind == MessageKind.FILE
 
     /** Blank client ids are treated as absent. */
     val clientIdOrNull: String? get() = clientId?.takeIf { it.isNotBlank() }
 }
+
+object MessageKind {
+    const val TEXT = "text"
+    const val IMAGE = "image"
+    const val FILE = "file"
+}
+
+/** Mirrors the `Attachment` model in docs/API.md (also the response of POST /uploads). */
+@Serializable
+data class Attachment(
+    val id: String,
+    /** Root-relative, e.g. `/api/v1/files/x.jpg`; resolve with [com.nokat.chat.data.remote.FileUrls]. */
+    val url: String = "",
+    val name: String = "",
+    val size: Long = 0,
+    val mime: String = "",
+    val kind: String = MessageKind.FILE,
+    val width: Int = 0,
+    val height: Int = 0,
+)
+
+/** A file picked on the device, described via ContentResolver (local only, never serialized). */
+data class LocalFile(
+    /** `content://` Uri as a string. */
+    val uri: String,
+    val name: String,
+    /** Bytes, or -1 when the provider does not report a size. */
+    val size: Long,
+    val mime: String,
+    val isImage: Boolean,
+    val width: Int,
+    val height: Int,
+)
 
 object MessageStatus {
     /** Local-only status for optimistic messages that the server has not acknowledged yet. */
@@ -131,10 +172,12 @@ data class GroupChatRequest(
     @SerialName("member_ids") val memberIds: List<String>,
 )
 
+/** `attachment_id` is omitted when null (Json.encodeDefaults = false). */
 @Serializable
 data class SendMessageRequest(
     val text: String,
     @SerialName("client_id") val clientId: String,
+    @SerialName("attachment_id") val attachmentId: String? = null,
 )
 
 @Serializable

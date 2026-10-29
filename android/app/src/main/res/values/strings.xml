@@ -76,6 +76,23 @@
     <string name="scroll_to_bottom">Aşak</string>
     <string name="back">Yza</string>
 
+    <!-- Attachments -->
+    <string name="attach">Goşmak</string>
+    <string name="attach_photo">Surat</string>
+    <string name="attach_file">Faýl</string>
+    <string name="preview_photo">📷 Surat</string>
+    <string name="preview_photo_caption">📷 %1$s</string>
+    <string name="preview_file">📎 %1$s</string>
+    <string name="error_file_too_big">„%1$s“ gaty uly. Iň köp 20 MB iberip bolýar</string>
+    <string name="error_file_too_big_generic">Faýl gaty uly. Iň köp 20 MB iberip bolýar</string>
+    <string name="error_file_unreadable">Faýly okap bolmady</string>
+    <string name="error_no_app_to_open">Bu faýly açyp biljek programma ýok</string>
+    <string name="open_file">Faýly aç</string>
+    <string name="download">Ýükläp al</string>
+    <string name="share">Paýlaş</string>
+    <string name="close">Ýap</string>
+    <string name="uploading">Ýüklenýär…</string>
+
     <!-- Errors -->
     <string name="error_network">Internet baglanyşygy ýok. Täzeden synanyşyň.</string>
     <string name="error_server">Serwerde näsazlyk ýüze çykdy</string>

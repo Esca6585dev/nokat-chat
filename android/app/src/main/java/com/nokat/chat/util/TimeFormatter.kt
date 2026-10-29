@@ -1,6 +1,7 @@
 package com.nokat.chat.util
 
 import android.content.Context
+import android.text.format.Formatter
 import com.nokat.chat.R
 import java.time.Instant
 import java.time.LocalDate
@@ -76,4 +77,8 @@ class TimeFormatter(context: Context) {
         }
         return appContext.getString(R.string.last_seen, whenText)
     }
+
+    /** Human-readable size, e.g. `1.2 MB`; empty when unknown. */
+    fun fileSize(bytes: Long): String =
+        if (bytes < 0) "" else Formatter.formatShortFileSize(appContext, bytes)
 }

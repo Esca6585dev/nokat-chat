@@ -12,3 +12,19 @@ export function wsUrl(token: string): string {
   base = base.replace(/^http(s?):\/\//i, (_m, s: string) => `ws${s}://`);
   return `${base}/ws?token=${encodeURIComponent(token)}`;
 }
+
+/** scheme://host:port of the API base URL ("" when the API URL is relative / same-origin). */
+export const API_ORIGIN = (() => {
+  try {
+    return /^https?:\/\//i.test(API_URL) ? new URL(API_URL).origin : "";
+  } catch {
+    return "";
+  }
+})();
+
+/** Resolve an attachment URL (root-relative per the API contract) against the API origin. */
+export function attachmentUrl(url: string | undefined | null): string {
+  if (!url) return "";
+  if (/^(https?:|blob:|data:)/i.test(url)) return url;
+  return API_ORIGIN + (url.startsWith("/") ? url : `/${url}`);
+}

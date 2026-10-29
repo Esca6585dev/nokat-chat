@@ -1,14 +1,18 @@
 package com.nokat.chat.ui.conversation
 
+import android.net.Uri
 import android.os.SystemClock
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nokat.chat.R
 import com.nokat.chat.data.model.Chat
 import com.nokat.chat.data.model.Message
+import com.nokat.chat.data.model.MessageKind
 import com.nokat.chat.data.model.MessageStatus
 import com.nokat.chat.data.model.User
 import com.nokat.chat.data.model.displayName
@@ -16,16 +20,21 @@ import com.nokat.chat.data.model.displayTitle
 import com.nokat.chat.data.model.peer
 import com.nokat.chat.data.realtime.WsEvent
 import com.nokat.chat.data.realtime.RealtimeClient
+import com.nokat.chat.data.remote.FileUrls
+import com.nokat.chat.data.remote.httpCode
 import com.nokat.chat.data.remote.toUiText
 import com.nokat.chat.data.repo.ChatRepository
 import com.nokat.chat.data.session.SessionManager
+import com.nokat.chat.util.AttachmentReader
 import com.nokat.chat.util.TimeFormatter
 import com.nokat.chat.util.Timestamps
 import com.nokat.chat.util.UiText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -37,9 +46,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** Rows of the (reverse-layout) message list, newest first. */
@@ -61,8 +72,23 @@ sealed interface ConvItem {
         val firstInRun: Boolean,
         /** Last bubble of a run: gets the "tail" corner. */
         val lastInRun: Boolean,
+        /** Photo / file payload, null for plain text. */
+        val attachment: AttachmentUi? = null,
     ) : ConvItem
 }
+
+@Immutable
+data class AttachmentUi(
+    val isImage: Boolean,
+    /** Coil model: the local `content://` Uri while we have it (no flicker after upload), else the remote URL. */
+    val previewModel: String,
+    /** Absolute download URL; null until the upload finished. */
+    val remoteUrl: String?,
+    val name: String,
+    val sizeText: String,
+    val width: Int,
+    val height: Int,
+)
 
 @Immutable
 sealed interface HeaderStatus {
@@ -97,6 +123,8 @@ class ConversationViewModel(
     private val session: SessionManager,
     private val realtime: RealtimeClient,
     private val timeFormatter: TimeFormatter,
+    private val fileUrls: FileUrls,
+    private val attachmentReader: AttachmentReader,
 ) : ViewModel() {
 
     private val myId: String? get() = session.currentUser?.id
@@ -129,6 +157,15 @@ class ConversationViewModel(
 
     var draft by mutableStateOf("")
         private set
+
+    /** clientId → upload progress 0..1 (absent = not uploading / unknown). Read per bubble. */
+    private val uploadProgress = mutableStateMapOf<String, Float>()
+
+    fun progressOf(clientId: String?): Float? = clientId?.let { uploadProgress[it] }
+
+    /** One-off messages for a snackbar (e.g. file too big). */
+    private val _notices = Channel<UiText>(Channel.BUFFERED)
+    val notices: Flow<UiText> = _notices.receiveAsFlow()
 
     private var resumed = false
     private var typingSentAt = 0L
@@ -307,21 +344,78 @@ class ConversationViewModel(
         deliver(message.copy(failed = false))
     }
 
-    private fun deliver(local: Message) {
-        val clientId = local.clientIdOrNull ?: return
+    /** Photos/files picked in the composer. The current draft becomes the caption of the first one. */
+    fun sendAttachments(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val me = myId ?: return
         viewModelScope.launch {
-            try {
-                val sent = chats.sendMessage(chatId, local.text, clientId)
-                // If the server does not echo client_id, keep ours so the optimistic row is replaced.
-                val fixed = if (sent.clientIdOrNull == null) sent.copy(clientId = clientId) else sent
-                messages.update { merge(it, listOf(fixed)) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+            val files = withContext(Dispatchers.IO) { uris.mapNotNull { attachmentReader.describe(it) } }
+            if (files.size < uris.size) _notices.send(UiText.Res(R.string.error_file_unreadable))
+            val (tooBig, accepted) = files.partition { it.size > AttachmentReader.MAX_UPLOAD_BYTES }
+            tooBig.firstOrNull()?.let { _notices.send(UiText.Res(R.string.error_file_too_big, listOf(it.name))) }
+            if (accepted.isEmpty()) return@launch
+
+            val caption = draft.trim()
+            if (caption.isNotEmpty()) {
+                draft = ""
+                stopTyping()
+            }
+            val locals = accepted.mapIndexed { index, file ->
+                val clientId = UUID.randomUUID().toString()
+                Message(
+                    id = "local-$clientId",
+                    chatId = chatId,
+                    senderId = me,
+                    text = if (index == 0) caption else "",
+                    clientId = clientId,
+                    status = MessageStatus.SENDING,
+                    createdAt = Timestamps.nowIso(),
+                    kind = if (file.isImage) MessageKind.IMAGE else MessageKind.FILE,
+                    localFile = file,
+                )
+            }
+            messages.update { it + locals }
+            _scrollToBottom.tryEmit(Unit)
+            // Sequential so the messages arrive in the order they were picked.
+            for (local in locals) deliverNow(local)
+        }
+    }
+
+    private fun deliver(local: Message) {
+        viewModelScope.launch { deliverNow(local) }
+    }
+
+    /** Uploads the attachment first if needed (only once, also across retries), then posts the message. */
+    private suspend fun deliverNow(local: Message) {
+        val clientId = local.clientIdOrNull ?: return
+        try {
+            var attachmentId = local.attachment?.id
+            val file = local.localFile
+            if (attachmentId == null && file != null) {
+                uploadProgress[clientId] = 0f
+                val uploaded = chats.uploadAttachment(file) { fraction ->
+                    // Called on an OkHttp thread; hop to main for the snapshot state write.
+                    viewModelScope.launch { if (uploadProgress.containsKey(clientId)) uploadProgress[clientId] = fraction }
+                }
+                attachmentId = uploaded.id
                 messages.update { list ->
-                    list.map { if (it.clientIdOrNull == clientId && it.isPending) it.copy(failed = true) else it }
+                    list.map { if (it.clientIdOrNull == clientId) it.copy(attachment = uploaded) else it }
                 }
             }
+            uploadProgress.remove(clientId)
+            val sent = chats.sendMessage(chatId, local.text, clientId, attachmentId)
+            // If the server does not echo client_id, keep ours so the optimistic row is replaced.
+            val fixed = if (sent.clientIdOrNull == null) sent.copy(clientId = clientId) else sent
+            messages.update { merge(it, listOf(fixed)) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (e.httpCode == 413) _notices.trySend(UiText.Res(R.string.error_file_too_big_generic))
+            messages.update { list ->
+                list.map { if (it.clientIdOrNull == clientId && it.isPending) it.copy(failed = true) else it }
+            }
+        } finally {
+            uploadProgress.remove(clientId)
         }
     }
 
@@ -337,10 +431,12 @@ class ConversationViewModel(
             val index = result.indexOfFirst { it.id == m.id || (cid != null && it.clientIdOrNull == cid) }
             if (index >= 0) {
                 val old = result[index]
+                // Keep the local file so the bubble keeps showing the already-decoded local preview.
+                val incoming = if (m.localFile == null && old.localFile != null) m.copy(localFile = old.localFile) else m
                 result[index] = if (!old.isPending && MessageStatus.rank(old.status) > MessageStatus.rank(m.status)) {
-                    m.copy(status = old.status)
+                    incoming.copy(status = old.status)
                 } else {
-                    m
+                    incoming
                 }
             } else {
                 result += m
@@ -381,6 +477,7 @@ class ConversationViewModel(
                     senderSeed = m.senderId,
                     firstInRun = !sameRunAsOlder,
                     lastInRun = !sameRunAsNewer,
+                    attachment = attachmentUi(m),
                 )
             }
             if (i == 0 || days[i - 1] != day) {
@@ -389,6 +486,29 @@ class ConversationViewModel(
             }
         }
         return out
+    }
+
+    private fun attachmentUi(m: Message): AttachmentUi? {
+        val remote = m.attachment
+        val local = m.localFile
+        if (remote == null && local == null) return null
+        val remoteUrl = remote?.url?.takeIf { it.isNotEmpty() }?.let { fileUrls.resolve(it) }
+        val model = local?.uri ?: remoteUrl ?: return null
+        val isImage = when {
+            m.kind == MessageKind.IMAGE -> true
+            m.kind == MessageKind.FILE -> false
+            remote != null -> remote.kind == MessageKind.IMAGE
+            else -> local?.isImage == true
+        }
+        return AttachmentUi(
+            isImage = isImage,
+            previewModel = model,
+            remoteUrl = remoteUrl,
+            name = remote?.name?.takeIf { it.isNotEmpty() } ?: local?.name.orEmpty(),
+            sizeText = timeFormatter.fileSize(remote?.size ?: local?.size ?: -1L),
+            width = remote?.width?.takeIf { it > 0 } ?: local?.width ?: 0,
+            height = remote?.height?.takeIf { it > 0 } ?: local?.height ?: 0,
+        )
     }
 
     private fun buildHeader(chat: Chat, typingIds: Set<String>): ConversationHeader {

@@ -24,6 +24,7 @@ export function MessageList({ chat, meId }: Props) {
   const state = useChatStore((s) => s.messages[chat.id]);
   const loadOlder = useChatStore((s) => s.loadOlder);
   const retry = useChatStore((s) => s.retry);
+  const cancelSend = useChatStore((s) => s.cancelSend);
   const items = state?.items ?? EMPTY;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -174,6 +175,11 @@ export function MessageList({ chat, meId }: Props) {
                   sender={members.get(m.sender_id)}
                   showSender={isGroup}
                   onRetry={m.local === "failed" && m.client_id ? () => retry(chat.id, m.client_id!) : undefined}
+                  onCancel={
+                    m.client_id && (m.local === "failed" || (m.local === "sending" && m.upload))
+                      ? () => cancelSend(chat.id, m.client_id!)
+                      : undefined
+                  }
                 />
               </Fragment>
             );

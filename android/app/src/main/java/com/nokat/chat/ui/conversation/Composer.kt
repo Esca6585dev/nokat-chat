@@ -19,18 +19,25 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -43,8 +50,11 @@ fun Composer(
     text: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
+    onPickPhoto: () -> Unit,
+    onPickFile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var attachMenuOpen by remember { mutableStateOf(false) }
     val canSend = text.isNotBlank()
     val sendScale by animateFloatAsState(
         targetValue = if (canSend) 1f else 0.82f,
@@ -71,6 +81,46 @@ fun Composer(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
+            Box {
+                IconButton(onClick = { attachMenuOpen = true }) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_attach_file),
+                        contentDescription = stringResource(R.string.attach),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.attach_photo)) },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_image),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        },
+                        onClick = {
+                            attachMenuOpen = false
+                            onPickPhoto()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.attach_file)) },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_file),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        },
+                        onClick = {
+                            attachMenuOpen = false
+                            onPickFile()
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.width(2.dp))
             Box(
                 modifier = Modifier
                     .weight(1f)

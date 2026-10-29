@@ -1,16 +1,18 @@
 "use client";
 
-import { ArrowLeft, MessageCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ArrowLeft, MessageCircle, UploadCloud } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { chatTitle, lastSeenLabel, peerOf, userDisplayName } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { useChatStore } from "@/lib/store";
 import type { Chat, ID, User } from "@/types";
 import { Avatar } from "./Avatar";
-import { Composer } from "./Composer";
+import { Composer, type ComposerHandle } from "./Composer";
 import { MessageList } from "./MessageList";
 
 const EMPTY: ID[] = [];
+
+const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
 function TypingDots() {
   return (
@@ -75,6 +77,14 @@ export function Conversation({ chatId, onBack }: Props) {
   const me = useChatStore((s) => s.me);
   const chat = useChatStore((s) => (chatId ? s.chats.find((c) => c.id === chatId) : undefined));
   const typingIds = useChatStore((s) => (chatId ? (s.typing[chatId] ?? EMPTY) : EMPTY));
+  const composer = useRef<ComposerHandle>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+
+  useEffect(() => {
+    dragDepth.current = 0;
+    setDragging(false);
+  }, [chatId]);
 
   if (!chatId || !chat || !me) {
     return (
@@ -93,7 +103,32 @@ export function Conversation({ chatId, onBack }: Props) {
   const isGroup = chat.type === "group";
 
   return (
-    <div className="chat-wallpaper flex h-full min-w-0 flex-col">
+    <div
+      className="chat-wallpaper relative flex h-full min-w-0 flex-col"
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current++;
+        setDragging(true);
+      }}
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(e) => {
+        if (!hasFiles(e)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        if (e.dataTransfer.files.length) composer.current?.addFiles(e.dataTransfer.files);
+      }}
+    >
       <header className="z-10 flex items-center gap-3 border-b border-slate-200/70 bg-white/90 px-2 py-2 backdrop-blur-md sm:px-4 dark:border-white/5 dark:bg-app-dark-surface/90">
         <button
           onClick={onBack}
@@ -119,7 +154,19 @@ export function Conversation({ chatId, onBack }: Props) {
       </header>
 
       <MessageList key={`list-${chat.id}`} chat={chat} meId={me.id} />
-      <Composer key={`composer-${chat.id}`} chatId={chat.id} />
+      <Composer key={`composer-${chat.id}`} chatId={chat.id} ref={composer} />
+
+      {dragging && (
+        <div className="animate-fade-in pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-sky-50/80 p-4 backdrop-blur-sm dark:bg-app-dark/80">
+          <div className="flex h-full max-h-80 w-full max-w-xl flex-col items-center justify-center rounded-3xl border-2 border-dashed border-brand-400 bg-white/70 text-center dark:border-sky-400/60 dark:bg-slate-800/60">
+            <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-accent to-brand-600 text-white shadow-lg shadow-brand-600/30">
+              <UploadCloud size={32} />
+            </div>
+            <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t.dropFiles}</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t.dropFilesHint}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -77,6 +77,9 @@ public/logo.svg       # brand logo / favicon
 - Direct chats and groups
 - Conversation with date separators, grouped bubbles, status ticks (✓ sent, ✓✓ read), infinite
   scroll for history, optimistic sends with `client_id` dedupe and retry on failure
+- Photos & files: paperclip picker (multiple), drag & drop onto the conversation, paste images; preview tray
+  with optional caption (sent with the first attachment); XHR upload with progress ring + cancel, retry on
+  failure; 20 MB client-side limit; image bubbles with lightbox + download, file cards with download link
 - Realtime: `message.new`, `message.read`, `chat.new`, `typing`, `presence`; reconnect + refetch
 - Read receipts only while the chat is open and the window is focused
 - Light/dark theme via `prefers-color-scheme`, responsive down to phone widths

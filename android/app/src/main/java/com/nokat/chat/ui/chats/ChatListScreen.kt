@@ -62,6 +62,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nokat.chat.R
+import com.nokat.chat.data.model.MessageKind
 import com.nokat.chat.ui.common.Avatar
 import com.nokat.chat.ui.common.EmptyState
 import com.nokat.chat.ui.common.GradientTopBar
@@ -309,17 +310,30 @@ private fun PreviewText(item: ChatItemUi, modifier: Modifier = Modifier) {
     }
     val you = stringResource(R.string.you)
     val noMessages = stringResource(R.string.no_messages)
+    val body: String = when (item.previewKind) {
+        MessageKind.IMAGE -> {
+            val caption = item.preview?.takeIf { it.isNotBlank() }
+            if (caption != null) {
+                stringResource(R.string.preview_photo_caption, caption)
+            } else {
+                stringResource(R.string.preview_photo)
+            }
+        }
+        MessageKind.FILE -> stringResource(R.string.preview_file, item.attachmentName ?: item.preview.orEmpty())
+        else -> item.preview ?: noMessages
+    }
     val prefix: String? = when {
+        item.preview == null && item.previewKind == MessageKind.TEXT -> null
         item.lastFromMe -> you
         item.lastSenderName != null -> item.lastSenderName
         else -> null
     }
-    val text = remember(item.preview, prefix, noMessages, colors.onSurface) {
+    val text = remember(body, prefix, colors.onSurface) {
         buildAnnotatedString {
-            if (prefix != null && item.preview != null) {
+            if (prefix != null) {
                 withStyle(SpanStyle(color = colors.onSurface)) { append("$prefix: ") }
             }
-            append(item.preview ?: noMessages)
+            append(body)
         }
     }
     Text(

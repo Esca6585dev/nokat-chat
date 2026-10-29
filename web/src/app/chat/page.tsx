@@ -10,6 +10,8 @@ import { Conversation } from "@/components/Conversation";
 import { NewChatDialog, type NewChatMode } from "@/components/NewChatDialog";
 import { SettingsDrawer } from "@/components/SettingsDrawer";
 import { Sidebar } from "@/components/Sidebar";
+import { Lightbox } from "@/components/Lightbox";
+import { Toast } from "@/components/Toast";
 
 const HISTORY_KEY = "nokatChat";
 
@@ -92,11 +94,25 @@ export default function ChatPage() {
   // Esc closes the conversation (when nothing else is open).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !dialog && !settingsOpen && useChatStore.getState().activeChatId) closeChat();
+      const st = useChatStore.getState();
+      if (e.key === "Escape" && !dialog && !settingsOpen && !st.lightbox && st.activeChatId) closeChat();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [dialog, settingsOpen, closeChat]);
+
+  // Dropping a file outside the conversation pane must not navigate away from the app.
+  useEffect(() => {
+    const block = (e: DragEvent) => {
+      if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => {
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", block);
+    };
+  }, []);
 
   // Tab title with unread count
   const unread = useChatStore((s) => s.chats.reduce((n, c) => n + (c.unread_count || 0), 0));
@@ -138,6 +154,8 @@ export default function ChatPage() {
         onClose={() => setDialog(null)}
         onOpenChat={openChat}
       />
+      <Lightbox />
+      <Toast />
     </main>
   );
 }

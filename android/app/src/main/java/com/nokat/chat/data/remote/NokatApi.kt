@@ -1,5 +1,6 @@
 package com.nokat.chat.data.remote
 
+import com.nokat.chat.data.model.Attachment
 import com.nokat.chat.data.model.Chat
 import com.nokat.chat.data.model.DirectChatRequest
 import com.nokat.chat.data.model.GroupChatRequest
@@ -14,10 +15,13 @@ import com.nokat.chat.data.model.VerifyRequest
 import com.nokat.chat.data.model.VerifyResponse
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -68,6 +72,11 @@ interface NokatApi {
 
     @POST("chats/{id}/messages")
     suspend fun sendMessage(@Path("id") chatId: String, @Body body: SendMessageRequest): Message
+
+    /** multipart/form-data with a single `file` part; max 20 MB (413 otherwise). */
+    @Multipart
+    @POST("uploads")
+    suspend fun upload(@Part file: MultipartBody.Part): Attachment
 
     @POST("chats/{id}/read")
     suspend fun markRead(@Path("id") chatId: String, @Body body: JsonObject): OkResponse

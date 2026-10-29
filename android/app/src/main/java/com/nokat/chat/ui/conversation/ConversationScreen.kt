@@ -1,5 +1,9 @@
 package com.nokat.chat.ui.conversation
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.fadeIn
@@ -33,16 +37,21 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,9 +62,11 @@ import com.nokat.chat.R
 import com.nokat.chat.ui.common.Avatar
 import com.nokat.chat.ui.common.GradientTopBar
 import com.nokat.chat.ui.common.nokatViewModel
+import com.nokat.chat.ui.common.openUrl
 import com.nokat.chat.ui.theme.NokatTheme
 import com.nokat.chat.ui.theme.Sky300
 import com.nokat.chat.util.asString
+import com.nokat.chat.util.resolve
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -63,16 +74,44 @@ import kotlinx.coroutines.launch
 /** Load older messages when the user scrolls within this many rows of the top. */
 private const val PREFETCH_DISTANCE = 8
 
+/** Max photos per Photo Picker selection. */
+private const val MAX_PICK = 10
+
 @Composable
 fun ConversationScreen(chatId: String, onBack: () -> Unit) {
     val vm = nokatViewModel {
-        ConversationViewModel(chatId, it.chatRepository, it.sessionManager, it.realtime, it.timeFormatter)
+        ConversationViewModel(
+            chatId = chatId,
+            chats = it.chatRepository,
+            session = it.sessionManager,
+            realtime = it.realtime,
+            timeFormatter = it.timeFormatter,
+            fileUrls = it.fileUrls,
+            attachmentReader = it.attachmentReader,
+        )
     }
     val rows by vm.items.collectAsStateWithLifecycle()
     val header by vm.header.collectAsStateWithLifecycle()
     val paging by vm.paging.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    var viewerImage by remember { mutableStateOf<AttachmentUi?>(null) }
+    val noAppText = stringResource(R.string.error_no_app_to_open)
+
+    // System Photo Picker (backported to API 26+ by androidx.activity) and the document picker.
+    // Neither needs storage permissions.
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(maxItems = MAX_PICK),
+    ) { uris -> vm.sendAttachments(uris) }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> vm.sendAttachments(uris) }
+
+    LaunchedEffect(vm) {
+        vm.notices.collect { snackbarHostState.showSnackbar(it.resolve(context)) }
+    }
 
     // Mark read / set active only while actually visible (not when backgrounded).
     LifecycleResumeEffect(chatId) {
@@ -109,6 +148,7 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = { ConversationTopBar(header = header, onBack = onBack) },
         containerColor = NokatTheme.colors.chatBackground,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
         Column(
@@ -143,7 +183,15 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
                             is ConvItem.DateHeader -> DateChip(item.label, Modifier.animateItem())
                             is ConvItem.Msg -> MessageBubble(
                                 item = item,
+                                progress = { vm.progressOf(item.message.clientIdOrNull) },
                                 onRetry = vm::retry,
+                                onOpenImage = { viewerImage = it },
+                                onOpenFile = { attachment ->
+                                    val url = attachment.remoteUrl
+                                    if (url != null && !context.openUrl(url)) {
+                                        Toast.makeText(context, noAppText, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                                 modifier = Modifier.animateItem(),
                             )
                         }
@@ -207,8 +255,16 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
                 text = vm.draft,
                 onTextChange = vm::onDraftChange,
                 onSend = vm::send,
+                onPickPhoto = {
+                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onPickFile = { filePicker.launch(arrayOf("*/*")) },
             )
         }
+    }
+
+    viewerImage?.let { image ->
+        ImageViewerDialog(attachment = image, onDismiss = { viewerImage = null })
     }
 }
 

@@ -8,6 +8,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokat.chat.data.model.Chat
+import com.nokat.chat.data.model.MessageKind
 import com.nokat.chat.data.model.displayName
 import com.nokat.chat.data.model.displayTitle
 import com.nokat.chat.data.model.peer
@@ -31,7 +32,12 @@ import kotlinx.coroutines.launch
 data class ChatItemUi(
     val id: String,
     val title: String,
+    /** Last message text (the caption for photos/files); null when there is no message. */
     val preview: String?,
+    /** Kind of the last message: "text" | "image" | "file". */
+    val previewKind: String = MessageKind.TEXT,
+    /** File name for file messages. */
+    val attachmentName: String? = null,
     val lastFromMe: Boolean,
     /** Sender's first name for incoming group messages. */
     val lastSenderName: String?,
@@ -82,7 +88,8 @@ class ChatListViewModel(
         } else {
             mapped.filter {
                 it.title.contains(needle, ignoreCase = true) ||
-                    it.preview?.contains(needle, ignoreCase = true) == true
+                    it.preview?.contains(needle, ignoreCase = true) == true ||
+                    it.attachmentName?.contains(needle, ignoreCase = true) == true
             }
         }
     }.flowOn(Dispatchers.Default)
@@ -136,6 +143,13 @@ class ChatListViewModel(
             id = chat.id,
             title = chat.displayTitle(me),
             preview = last?.text?.replace('\n', ' '),
+            previewKind = when {
+                last == null -> MessageKind.TEXT
+                last.kind == MessageKind.IMAGE || last.attachment?.kind == MessageKind.IMAGE -> MessageKind.IMAGE
+                last.kind == MessageKind.FILE || last.attachment != null -> MessageKind.FILE
+                else -> MessageKind.TEXT
+            },
+            attachmentName = last?.attachment?.name,
             lastFromMe = fromMe,
             lastSenderName = senderName,
             outgoingStatus = if (fromMe) last?.status else null,

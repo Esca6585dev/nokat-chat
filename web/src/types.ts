@@ -16,11 +16,29 @@ export interface User {
 
 export type MessageStatus = "sent" | "delivered" | "read";
 
+export type MessageKind = "text" | "image" | "file";
+
+export interface Attachment {
+  id: ID;
+  /** Root-relative path ("/api/v1/files/x.jpg"); resolve with `attachmentUrl()`. */
+  url: string;
+  name: string;
+  size: number;
+  mime: string;
+  kind: "image" | "file";
+  width: number;
+  height: number;
+}
+
 export interface Message {
   id: ID;
   chat_id: ID;
   sender_id: ID;
+  /** Missing on older servers → treated as "text". */
+  kind: MessageKind;
+  /** Text, or the optional caption for image/file messages. */
   text: string;
+  attachment: Attachment | null;
   client_id?: string;
   status: MessageStatus;
   created_at: string;
@@ -31,6 +49,10 @@ export type LocalState = "sending" | "failed";
 
 export interface UIMessage extends Message {
   local?: LocalState;
+  /** Local object URL used to preview an image before/after upload (avoids flicker). */
+  localPreview?: string;
+  /** Upload progress 0..1 while the attachment is being uploaded. */
+  upload?: { progress: number };
 }
 
 export type ChatType = "direct" | "group";
@@ -100,7 +122,7 @@ export type ServerEvent =
   | { type: "pong"; data: Record<string, never> };
 
 export type ClientEvent =
-  | { type: "message.send"; data: { chat_id: ID; text: string; client_id: string } }
+  | { type: "message.send"; data: { chat_id: ID; text: string; client_id: string; attachment_id?: ID } }
   | { type: "typing"; data: { chat_id: ID; typing: boolean } }
   | { type: "read"; data: { chat_id: ID } }
   | { type: "ping"; data: Record<string, never> };

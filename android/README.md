@@ -104,6 +104,13 @@ com.nokat.chat
   - Sending is optimistic: a local bubble appears with a `client_id`. The REST response and the WebSocket echo both replace it by `client_id` or `id`. A failed send shows a retry action.
   - Typing events are throttled to one `typing:true` every 3 s, and `typing:false` is sent after 4 s idle. Remote typing indicators expire after 6 s.
   - The chat is marked read while it is visible (on resume and on each new incoming message).
+- **Attachments:**
+  - The paperclip in the composer opens a menu. "Surat" opens the system Photo Picker (backported to API 26+ by androidx.activity) and "Faýl" opens the document picker. Neither needs storage permissions.
+  - Files are streamed from the `ContentResolver` to `POST /uploads` (multipart field `file`) with progress, then sent with `attachment_id`.
+  - Files over 20 MB are rejected before upload with a snackbar.
+  - The composer text becomes the caption of the first attachment.
+  - Root-relative attachment URLs are resolved against the origin of the base URL (`FileUrls`).
+  - Tapping a photo opens a fullscreen viewer with pinch zoom, share and download. Tapping a file opens its URL with `ACTION_VIEW`.
 - **Language:** all UI strings are in Turkmen, in `res/values/strings.xml`.
 
 ## Notes and limitations

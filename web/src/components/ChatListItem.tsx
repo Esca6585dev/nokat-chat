@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { chatTitle, listTime, peerOf, userDisplayName } from "@/lib/format";
+import { chatTitle, listTime, messagePreview, peerOf, userDisplayName } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import type { Chat, ID } from "@/types";
 import { Avatar } from "./Avatar";
@@ -95,7 +95,7 @@ function ChatListItemBase({ chat, meId, active, typingUsers, onClick }: Props) {
                 {prefix && (
                   <span className={active ? "text-white" : "text-slate-700 dark:text-slate-300"}>{prefix}</span>
                 )}
-                {last.text.replace(/\s+/g, " ")}
+                {messagePreview(last)}
               </>
             ) : (
               <span className="italic opacity-70">{t.draftEmpty}</span>

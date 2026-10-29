@@ -1,5 +1,5 @@
 import { months, t, weekdaysShort } from "./i18n";
-import type { Chat, ID, User } from "@/types";
+import type { Chat, ID, Message, User } from "@/types";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -112,4 +112,25 @@ export function newClientId(): string {
     }
   }
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function humanSize(bytes: number): string {
+  if (!isFinite(bytes) || bytes < 0) return "";
+  let i = 0;
+  let n = bytes;
+  while (n >= 1024 && i < t.sizeUnits.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  const v = i === 0 ? String(n) : n < 10 ? n.toFixed(1) : String(Math.round(n));
+  return `${v.replace(/\.0$/, "")} ${t.sizeUnits[i]}`;
+}
+
+/** One-line preview of a message for chat lists etc. */
+export function messagePreview(m: Pick<Message, "kind" | "text" | "attachment">): string {
+  const text = (m.text ?? "").replace(/\s+/g, " ").trim();
+  const kind = m.kind || (m.attachment ? m.attachment.kind : "text");
+  if (kind === "image") return `📷 ${text || t.photo}`;
+  if (kind === "file") return `📎 ${m.attachment?.name || text || t.file}`;
+  return text;
 }

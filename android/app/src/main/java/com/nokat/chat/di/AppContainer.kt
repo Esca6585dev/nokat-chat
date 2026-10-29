@@ -5,12 +5,14 @@ import com.nokat.chat.BuildConfig
 import com.nokat.chat.data.local.SessionStore
 import com.nokat.chat.data.realtime.RealtimeClient
 import com.nokat.chat.data.remote.AuthInterceptor
+import com.nokat.chat.data.remote.FileUrls
 import com.nokat.chat.data.remote.NokatApi
 import com.nokat.chat.data.repo.AuthRepository
 import com.nokat.chat.data.repo.ChatRepository
 import com.nokat.chat.data.repo.UserRepository
 import com.nokat.chat.data.session.SessionManager
 import com.nokat.chat.data.session.SessionState
+import com.nokat.chat.util.AttachmentReader
 import com.nokat.chat.util.TimeFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,10 +68,12 @@ class AppContainer(context: Context) {
 
     val realtime = RealtimeClient(appContext, okHttp, json, baseUrl, appScope)
     val timeFormatter = TimeFormatter(appContext)
+    val fileUrls = FileUrls(baseUrl)
+    val attachmentReader = AttachmentReader(appContext)
 
     val authRepository = AuthRepository(api, sessionManager)
     val userRepository = UserRepository(api, json, sessionManager)
-    val chatRepository = ChatRepository(api, json, realtime, sessionManager, appScope)
+    val chatRepository = ChatRepository(api, json, realtime, sessionManager, appScope, appContext.contentResolver)
 
     init {
         // Connect the socket while signed in; tear everything down on logout.

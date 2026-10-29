@@ -84,6 +84,22 @@ export const t = {
   startConversation: "Söhbetdeşligi başlaň — ilkinji habary ugradyň 👋",
   connecting: "Birikdirilýär…",
 
+  // Attachments
+  attach: "Faýl goş",
+  photo: "Surat",
+  file: "Faýl",
+  uploading: "Ýüklenýär…",
+  fileTooLarge: "Faýl gaty uly (iň köp 20 MB)",
+  uploadFailed: "Faýl ýüklenmedi",
+  download: "Ýükle",
+  open: "Aç",
+  remove: "Aýyr",
+  cancelUpload: "Ýüklemegi ýatyr",
+  captionPlaceholder: "Ýazgy goş...",
+  dropFiles: "Faýllary şu ýere taşlaň",
+  dropFilesHint: "Surat ýa-da faýl ugratmak üçin",
+  sizeUnits: ["B", "KB", "MB", "GB"],
+
   // New chat / group
   searchUsers: "At, ulanyjy ady ýa-da telefon",
   searchHint: "Ulanyjy tapmak üçin ýazmaga başlaň",
