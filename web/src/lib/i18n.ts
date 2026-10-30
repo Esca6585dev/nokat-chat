@@ -100,6 +100,35 @@ export const t = {
   dropFilesHint: "Surat ýa-da faýl ugratmak üçin",
   sizeUnits: ["B", "KB", "MB", "GB"],
 
+  // Secret chats
+  secretChat: "Gizlin söhbet",
+  startSecretChat: "Gizlin söhbet aç",
+  startSecretChatHint: "Hatlar diňe siziň we dostuňyzyň enjamynda açylýar",
+  secretWaiting: (name: string) => `Garaşylýar… ${name} kabul etmeli`,
+  secretWaitingShort: "Garaşylýar…",
+  secretInvitePreview: "Gizlin söhbet çakylygy",
+  secretInviteTitle: (name: string) => `${name} sizi gizlin söhbete çagyrýar`,
+  secretInviteBody:
+    "Gizlin söhbetdäki hatlar uçdan-uja şifrlenýär: olary diňe siziň şu enjamyňyz we dostuňyzyň enjamy okap biler. Serwer hatlaryň mazmunyny görmeýär.",
+  secretWaitingBody:
+    "Dostuňyz çakylygy kabul edenden soň, hatlar uçdan-uja şifrlenip ugradylar. Hatlar diňe şu enjamda okalyp biler.",
+  accept: "Kabul et",
+  decline: "Ret et",
+  encryptionKey: "Şifrleme açary",
+  fingerprintExplain: (name: string) =>
+    `Bu suraty we kody ${name} bilen deňeşdiriň (ýüzbe-ýüz ýa-da jaň arkaly). Eger olar onuň enjamynda görkezilýän bilen gabat gelýän bolsa, söhbetdeşligiňiz uçdan-uja şifrlenendir we hiç kim arada diňläp bilmeýär.`,
+  e2eNotice: "Hatlar uçdan-uja şifrlenýär",
+  otherDeviceBanner: "🔒 Bu gizlin söhbet başga enjamda açyldy",
+  otherDeviceHint: "Bu söhbetdäki hatlary diňe ol enjamda okap we ugradyp bolýar.",
+  encryptedMessage: "🔒 Şifrlenen hat",
+  decryptFailed: "⚠️ Hat açylmady",
+  deleteSecretChat: "Gizlin söhbeti poz",
+  deleteSecretConfirm: "Gizlin söhbet we ähli hatlar iki tarapda hem pozular. Dowam edilsinmi?",
+  declineSecretConfirm: "Çakylygy ret etmek isleýärsiňizmi?",
+  secretUnsupported: "Bu brauzer şifrlemäni goldamaýar (HTTPS gerek)",
+  secretAlreadyAccepted: "Bu çakylyk başga enjamda kabul edildi",
+  moreActions: "Başga hereketler",
+
   // New chat / group
   searchUsers: "At, ulanyjy ady ýa-da telefon",
   searchHint: "Ulanyjy tapmak üçin ýazmaga başlaň",

@@ -67,7 +67,7 @@ export function userDisplayName(u: User | undefined | null): string {
 }
 
 export function peerOf(chat: Chat, meId: ID | undefined): User | undefined {
-  if (chat.type !== "direct") return undefined;
+  if (chat.type === "group") return undefined;
   return chat.members.find((m) => m.id !== meId) ?? chat.members[0];
 }
 
@@ -130,6 +130,7 @@ export function humanSize(bytes: number): string {
 export function messagePreview(m: Pick<Message, "kind" | "text" | "attachment">): string {
   const text = (m.text ?? "").replace(/\s+/g, " ").trim();
   const kind = m.kind || (m.attachment ? m.attachment.kind : "text");
+  if (kind === "encrypted") return t.encryptedMessage;
   if (kind === "image") return `📷 ${text || t.photo}`;
   if (kind === "file") return `📎 ${m.attachment?.name || text || t.file}`;
   return text;

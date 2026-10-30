@@ -27,14 +27,16 @@ export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 /** Backward compatibility: missing `kind` → "text", missing `attachment` → null. */
 export function normalizeMessage<T extends Message>(m: T): T {
   const attachment = m.attachment ?? null;
-  const kind = m.kind || (attachment ? attachment.kind : "text");
-  return { ...m, kind, attachment, text: m.text ?? "" };
+  const ciphertext = m.ciphertext ?? "";
+  const kind = m.kind || (ciphertext ? "encrypted" : attachment ? attachment.kind : "text");
+  return { ...m, kind, attachment, ciphertext, text: m.text ?? "" };
 }
 
 export function normalizeChat(c: Chat): Chat {
   return {
     ...c,
     members: c.members ?? [],
+    secret: c.secret ?? null,
     unread_count: c.unread_count ?? 0,
     last_message: c.last_message ? normalizeMessage(c.last_message) : null,
   };
@@ -126,6 +128,23 @@ export const api = {
       client_id: clientId,
       ...(attachmentId ? { attachment_id: attachmentId } : {}),
     }).then(normalizeMessage),
+  /** Secret chats: `text` must be empty, content goes in `ciphertext`. */
+  sendEncrypted: (chatId: ID, ciphertext: string, clientId: string, attachmentId?: ID) =>
+    request<Message>("POST", `/chats/${encodeURIComponent(chatId)}/messages`, {
+      text: "",
+      ciphertext,
+      client_id: clientId,
+      ...(attachmentId ? { attachment_id: attachmentId } : {}),
+    }).then(normalizeMessage),
+
+  // Secret chats
+  createSecret: (userId: ID, publicKey: string) =>
+    request<Chat>("POST", "/chats/secret", { user_id: userId, public_key: publicKey }).then(normalizeChat),
+  acceptSecret: (chatId: ID, publicKey: string) =>
+    request<Chat>("POST", `/chats/${encodeURIComponent(chatId)}/secret/accept`, { public_key: publicKey }).then(
+      normalizeChat,
+    ),
+  deleteChat: (chatId: ID) => request<unknown>("DELETE", `/chats/${encodeURIComponent(chatId)}`),
   markRead: (chatId: ID) =>
     request<{ ok: boolean }>("POST", `/chats/${encodeURIComponent(chatId)}/read`, {}),
 

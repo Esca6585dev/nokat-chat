@@ -1,8 +1,8 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { Download } from "lucide-react";
-import { memo, useState } from "react";
+import { Download, ImageOff, Lock } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
 import { attachmentUrl } from "@/lib/config";
 import { gradientFor, humanSize, timeHM, userDisplayName } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -12,6 +12,9 @@ import { Avatar } from "./Avatar";
 import { FileIcon, fileExt } from "./FileIcon";
 import { ProgressRing } from "./ProgressRing";
 import { Ticks } from "./Ticks";
+import { saveBlob } from "./Lightbox";
+import { Spinner } from "./Spinner";
+import { useSecretMedia } from "./useSecretMedia";
 
 interface Props {
   message: UIMessage;
@@ -81,6 +84,16 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
   const uploading = !!message.upload && message.local === "sending";
   const busy = message.local === "sending";
   const showName = showSender && !mine && first && !!sender;
+  const secret = !!message.secretFile;
+  const media = useSecretMedia(message, secret && isImage);
+  // Secret files: download is requested on click, then saved once decrypted.
+  const wantSave = useRef(false);
+  useEffect(() => {
+    if (wantSave.current && media.blob && att) {
+      wantSave.current = false;
+      saveBlob(media.blob, att.name);
+    }
+  }, [media.blob, att]);
 
   const radius = mine
     ? `rounded-2xl ${first ? "" : "rounded-tr-md"} ${last ? "rounded-br-sm" : "rounded-br-md"}`
@@ -111,9 +124,9 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
   let body: React.ReactNode;
 
   if (isImage) {
-    const src = message.localPreview || attachmentUrl(att.url);
+    const src = message.localPreview || (secret ? media.url : attachmentUrl(att.url));
     const box = imageBox(att.width, att.height);
-    const canOpen = !busy && !failed && !!att.url;
+    const canOpen = !busy && !failed && !!att.url && (!secret || !!media.blob);
     body = (
       <div className={`${radius} ${bubbleColor} overflow-hidden p-1 shadow-sm`} style={{ width: box.width + 8, maxWidth: "100%" }}>
         {showName && (
@@ -127,7 +140,10 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
         >
           <button
             type="button"
-            onClick={() => canOpen && openLightbox(attachmentUrl(att.url), att.name)}
+            onClick={() =>
+              canOpen &&
+              (secret ? openLightbox("", att.name, media.blob ?? undefined) : openLightbox(attachmentUrl(att.url), att.name))
+            }
             className={`absolute inset-0 block h-full w-full ${canOpen ? "cursor-zoom-in" : "cursor-default"}`}
             aria-label={att.name || t.photo}
           >
@@ -142,6 +158,11 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
               />
             )}
           </button>
+          {secret && !src && !busy && !failed && (
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-slate-400">
+              {media.error ? <ImageOff size={28} /> : <Spinner size={24} />}
+            </span>
+          )}
           {(busy || failed) && (
             <span className="absolute inset-0 flex items-center justify-center bg-black/10">
               <ProgressRing
@@ -163,7 +184,14 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
       </div>
     );
   } else if (isFile) {
-    const href = att.url ? attachmentUrl(att.url) : undefined;
+    const href = att.url && !secret ? attachmentUrl(att.url) : undefined;
+    const saveSecret = () => {
+      if (media.blob) saveBlob(media.blob, att.name);
+      else {
+        wantSave.current = true;
+        media.load();
+      }
+    };
     const sub = uploading
       ? `${humanSize(Math.round(att.size * (message.upload?.progress ?? 0)))} / ${humanSize(att.size)}`
       : [humanSize(att.size), fileExt(att.name)].filter(Boolean).join(" · ");
@@ -175,7 +203,19 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
           </div>
         )}
         <div className="flex items-center gap-3">
-          {busy || failed ? (
+          {secret && !busy && !failed ? (
+            <button
+              type="button"
+              onClick={saveSecret}
+              className={`relative flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full transition ${
+                mine ? "bg-white/20 text-white hover:bg-white/30" : "bg-gradient-to-br from-teal-400 to-brand-600 text-white"
+              }`}
+              aria-label={`${t.download}: ${att.name}`}
+              title={media.error ? t.decryptFailed : t.download}
+            >
+              {media.loading ? <Spinner size={20} /> : media.error ? <ImageOff size={20} /> : <Download size={20} />}
+            </button>
+          ) : busy || failed ? (
             <ProgressRing
               size={46}
               tone={mine ? "light" : "brand"}
@@ -203,7 +243,16 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
             </a>
           )}
           <div className="min-w-0 flex-1">
-            {href && !busy ? (
+            {secret && !busy && !failed ? (
+              <button
+                type="button"
+                onClick={saveSecret}
+                className="block max-w-full truncate text-left text-[15px] font-medium hover:underline"
+                title={att.name}
+              >
+                {att.name}
+              </button>
+            ) : href && !busy ? (
               <a
                 href={href}
                 download={att.name}
@@ -232,6 +281,21 @@ function MessageBubbleBase({ message, mine, first, last, sender, showSender, onR
         ) : (
           <div className="mt-1 flex justify-end">{meta()}</div>
         )}
+      </div>
+    );
+  } else if (kind === "encrypted") {
+    body = (
+      <div className={`${radius} ${bubbleColor} px-3 pb-2 pt-1.5 shadow-sm`}>
+        {showName && <SenderName sender={sender!} />}
+        <div className="flex items-center gap-1.5 text-[15px] italic leading-[1.35rem] opacity-80">
+          {message.e2e === "failed" ? t.decryptFailed : (
+            <>
+              <Lock size={14} className="shrink-0" />
+              {t.encryptedMessage.replace(/^🔒\s*/, "")}
+            </>
+          )}
+          <span className="ml-auto pl-2 not-italic">{meta()}</span>
+        </div>
       </div>
     );
   } else if (jumbo) {

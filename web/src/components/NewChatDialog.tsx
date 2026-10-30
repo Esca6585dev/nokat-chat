@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Search, Users, X } from "lucide-react";
+import { ArrowLeft, Lock, Search, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { errorMessage } from "@/lib/errors";
 import { userDisplayName } from "@/lib/format";
@@ -13,7 +13,7 @@ import { Modal } from "./Modal";
 import { Spinner } from "./Spinner";
 import { UserRow } from "./UserRow";
 
-export type NewChatMode = "direct" | "group";
+export type NewChatMode = "direct" | "group" | "secret";
 
 interface Props {
   open: boolean;
@@ -31,6 +31,7 @@ export function NewChatDialog({ open, initialMode, onClose, onOpenChat }: Props)
   const [error, setError] = useState<string | null>(null);
   const openDirect = useChatStore((s) => s.openDirect);
   const createGroup = useChatStore((s) => s.createGroup);
+  const startSecretChat = useChatStore((s) => s.startSecretChat);
   const { results, loading } = useUserSearch(query, 1);
 
   useEffect(() => {
@@ -58,6 +59,17 @@ export function NewChatDialog({ open, initialMode, onClose, onOpenChat }: Props)
     }
   };
 
+  const startSecret = async (u: User) => {
+    setBusy(u.id);
+    setError(null);
+    const chat = await startSecretChat(u.id);
+    setBusy(null);
+    if (chat) {
+      onClose();
+      onOpenChat(chat.id);
+    }
+  };
+
   const toggle = (u: User) =>
     setSelected((s) => (s.some((x) => x.id === u.id) ? s.filter((x) => x.id !== u.id) : s.concat(u)));
 
@@ -80,14 +92,25 @@ export function NewChatDialog({ open, initialMode, onClose, onOpenChat }: Props)
   };
 
   const isGroup = mode === "group";
+  const isSecret = mode === "secret";
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={isGroup ? t.newGroup : t.newChat}
+      title={
+        isSecret ? (
+          <span className="flex items-center gap-2 text-teal-700 dark:text-teal-300">
+            <Lock size={18} /> {t.startSecretChat}
+          </span>
+        ) : isGroup ? (
+          t.newGroup
+        ) : (
+          t.newChat
+        )
+      }
       leading={
-        isGroup && initialMode === "direct" ? (
+        mode !== "direct" && initialMode === "direct" ? (
           <button
             onClick={() => setMode("direct")}
             className="-ml-2 rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5"
@@ -159,14 +182,32 @@ export function NewChatDialog({ open, initialMode, onClose, onOpenChat }: Props)
             onChange={(e) => setQuery(e.target.value)}
             placeholder={isGroup ? t.addMembers : t.searchUsers}
             autoFocus={!isGroup}
+            key={mode}
             className="w-full rounded-full bg-slate-100 py-2.5 pl-10 pr-4 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-brand-500/30 dark:bg-white/5 dark:text-white"
           />
         </div>
         {error && <p className="text-sm text-rose-500">{error}</p>}
+        {isSecret && (
+          <p className="flex items-start gap-2 rounded-2xl bg-teal-50 p-3 text-sm text-teal-800 dark:bg-teal-400/10 dark:text-teal-200">
+            <Lock size={16} className="mt-0.5 shrink-0" />
+            {t.startSecretChatHint}
+          </p>
+        )}
       </div>
 
       <div className="min-h-64 px-2 pb-3">
-        {!isGroup && (
+        {mode === "direct" && (
+          <button
+            onClick={() => setMode("secret")}
+            className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left font-medium text-teal-600 transition hover:bg-teal-50/80 dark:text-teal-400 dark:hover:bg-white/5"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-teal-400 to-emerald-600 text-white">
+              <Lock size={20} />
+            </span>
+            {t.startSecretChat}
+          </button>
+        )}
+        {mode === "direct" && (
           <button
             onClick={() => setMode("group")}
             className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left font-medium text-brand-600 transition hover:bg-brand-50/80 dark:text-sky-400 dark:hover:bg-white/5"
@@ -200,7 +241,12 @@ export function NewChatDialog({ open, initialMode, onClose, onOpenChat }: Props)
                 onClick={() => toggle(u)}
               />
             ) : (
-              <UserRow key={u.id} user={u} disabled={busy === u.id} onClick={() => startDirect(u)} />
+              <UserRow
+                key={u.id}
+                user={u}
+                disabled={busy === u.id}
+                onClick={() => (isSecret ? startSecret(u) : startDirect(u))}
+              />
             ),
           )}
       </div>

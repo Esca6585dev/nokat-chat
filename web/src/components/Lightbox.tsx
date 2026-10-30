@@ -7,20 +7,27 @@ import { t } from "@/lib/i18n";
 import { useChatStore } from "@/lib/store";
 import { Spinner } from "./Spinner";
 
-async function download(url: string, name: string) {
+export function saveBlob(blob: Blob, name: string) {
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name || "file";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+async function download(url: string, name: string, blob?: Blob) {
+  if (blob) {
+    saveBlob(blob, name);
+    return;
+  }
   try {
     // Cross-origin <a download> is ignored by browsers, so fetch as a blob first.
     const res = await fetch(url);
     if (!res.ok) throw new Error(String(res.status));
-    const blob = await res.blob();
-    const href = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = href;
-    a.download = name || "image";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(href), 1000);
+    saveBlob(await res.blob(), name || "image");
   } catch {
     window.open(url, "_blank", "noopener");
   }
@@ -31,6 +38,18 @@ export function Lightbox() {
   const close = useChatStore((s) => s.closeLightbox);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  // Decrypted secret media: own object URL, revoked when the lightbox closes.
+  useEffect(() => {
+    if (!box?.blob) {
+      setBlobUrl(null);
+      return;
+    }
+    const u = URL.createObjectURL(box.blob);
+    setBlobUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [box?.blob]);
 
   useEffect(() => {
     setLoaded(false);
@@ -54,7 +73,7 @@ export function Lightbox() {
         <button
           onClick={async () => {
             setBusy(true);
-            await download(box.url, box.name);
+            await download(box.url, box.name, box.blob);
             setBusy(false);
           }}
           className="flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition hover:bg-white/10"
@@ -70,7 +89,7 @@ export function Lightbox() {
       <div className="relative flex min-h-0 flex-1 items-center justify-center p-3 sm:p-8">
         {!loaded && <Spinner size={32} className="absolute text-white/70" />}
         <img
-          src={box.url}
+          src={box.blob ? (blobUrl ?? undefined) : box.url}
           alt={box.name}
           onLoad={() => setLoaded(true)}
           onClick={(e) => e.stopPropagation()}

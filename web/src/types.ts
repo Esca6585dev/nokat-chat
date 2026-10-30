@@ -16,7 +16,7 @@ export interface User {
 
 export type MessageStatus = "sent" | "delivered" | "read";
 
-export type MessageKind = "text" | "image" | "file";
+export type MessageKind = "text" | "image" | "file" | "encrypted";
 
 export interface Attachment {
   id: ID;
@@ -39,6 +39,8 @@ export interface Message {
   /** Text, or the optional caption for image/file messages. */
   text: string;
   attachment: Attachment | null;
+  /** Secret chats: base64(IV ‖ AES-GCM(payload)); "" for normal messages. */
+  ciphertext?: string;
   client_id?: string;
   status: MessageStatus;
   created_at: string;
@@ -53,9 +55,26 @@ export interface UIMessage extends Message {
   localPreview?: string;
   /** Upload progress 0..1 while the attachment is being uploaded. */
   upload?: { progress: number };
+  /**
+   * Secret chats only (memory only, never persisted):
+   * "ok" = decrypted (kind/text/attachment hold the plaintext view), "failed" = could not decrypt,
+   * "nokey" = this device has no key for the chat.
+   */
+  e2e?: "ok" | "failed" | "nokey";
+  /** Decrypted file descriptor for secret image/file messages (url = encrypted blob, key = file key). */
+  secretFile?: { url: string; key: string; mime: string; name: string };
 }
 
-export type ChatType = "direct" | "group";
+export type ChatType = "direct" | "group" | "secret";
+
+export interface SecretInfo {
+  state: "pending" | "active";
+  initiator_id: ID;
+  /** base64 uncompressed P-256 point */
+  initiator_key: string;
+  /** "" while pending */
+  peer_key: string;
+}
 
 export interface Chat {
   id: ID;
@@ -63,6 +82,8 @@ export interface Chat {
   title: string;
   avatar_url: string;
   members: User[];
+  /** Only for type "secret"; null otherwise. */
+  secret?: SecretInfo | null;
   last_message: Message | null;
   unread_count: number;
   updated_at: string;
@@ -117,12 +138,14 @@ export type ServerEvent =
   | { type: "message.new"; data: Message }
   | { type: "message.read"; data: ReadEvent }
   | { type: "chat.new"; data: Chat }
+  | { type: "chat.updated"; data: Chat }
+  | { type: "chat.deleted"; data: { chat_id: ID } }
   | { type: "typing"; data: TypingEvent }
   | { type: "presence"; data: PresenceEvent }
   | { type: "pong"; data: Record<string, never> };
 
 export type ClientEvent =
-  | { type: "message.send"; data: { chat_id: ID; text: string; client_id: string; attachment_id?: ID } }
+  | { type: "message.send"; data: { chat_id: ID; text: string; client_id: string; attachment_id?: ID; ciphertext?: string } }
   | { type: "typing"; data: { chat_id: ID; typing: boolean } }
   | { type: "read"; data: { chat_id: ID } }
   | { type: "ping"; data: Record<string, never> };

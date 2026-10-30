@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:e2e": "node --experimental-strip-types --no-warnings scripts/e2e-vectors.test.mjs"
   },
   "dependencies": {
     "lucide-react": "0.577.0",

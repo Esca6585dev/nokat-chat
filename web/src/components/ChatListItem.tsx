@@ -1,5 +1,6 @@
 "use client";
 
+import { Lock } from "lucide-react";
 import { memo } from "react";
 import { chatTitle, listTime, messagePreview, peerOf, userDisplayName } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -21,6 +22,13 @@ function ChatListItemBase({ chat, meId, active, typingUsers, onClick }: Props) {
   const last = chat.last_message;
   const mine = !!last && last.sender_id === meId;
   const isGroup = chat.type === "group";
+  const isSecret = chat.type === "secret";
+  const pendingLabel =
+    isSecret && chat.secret?.state === "pending"
+      ? chat.secret.initiator_id === meId
+        ? t.secretWaitingShort
+        : t.secretInvitePreview
+      : "";
 
   let typingLabel = "";
   if (typingUsers.length) {
@@ -60,8 +68,13 @@ function ChatListItemBase({ chat, meId, active, typingUsers, onClick }: Props) {
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className={`truncate font-semibold ${active ? "text-white" : "text-slate-900 dark:text-slate-100"}`}>
-            {title}
+          <span
+            className={`flex min-w-0 items-center gap-1 font-semibold ${
+              active ? "text-white" : isSecret ? "text-teal-600 dark:text-teal-400" : "text-slate-900 dark:text-slate-100"
+            }`}
+          >
+            {isSecret && <Lock size={14} strokeWidth={2.6} className="shrink-0" aria-label={t.secretChat} />}
+            <span className="truncate">{title}</span>
           </span>
           <span
             className={`ml-auto shrink-0 text-xs tabular-nums ${
@@ -72,7 +85,7 @@ function ChatListItemBase({ chat, meId, active, typingUsers, onClick }: Props) {
           </span>
         </div>
         <div className="mt-0.5 flex items-center gap-1.5">
-          {!typingLabel && mine && last && (
+          {!typingLabel && !pendingLabel && mine && last && (
             <span className="shrink-0">
               <Ticks message={last} variant={active ? "bubble" : "list"} size={16} />
             </span>
@@ -90,6 +103,8 @@ function ChatListItemBase({ chat, meId, active, typingUsers, onClick }: Props) {
           >
             {typingLabel ? (
               typingLabel
+            ) : pendingLabel ? (
+              <span className={active ? "text-white" : "text-teal-600 dark:text-teal-400"}>{pendingLabel}</span>
             ) : last ? (
               <>
                 {prefix && (
@@ -98,7 +113,7 @@ function ChatListItemBase({ chat, meId, active, typingUsers, onClick }: Props) {
                 {messagePreview(last)}
               </>
             ) : (
-              <span className="italic opacity-70">{t.draftEmpty}</span>
+              <span className="italic opacity-70">{isSecret ? t.e2eNotice : t.draftEmpty}</span>
             )}
           </span>
           {chat.unread_count > 0 && (

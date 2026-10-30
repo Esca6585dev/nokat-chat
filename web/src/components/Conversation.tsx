@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, MessageCircle, UploadCloud } from "lucide-react";
+import { ArrowLeft, KeyRound, Lock, MessageCircle, Trash2, UploadCloud } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { chatTitle, lastSeenLabel, peerOf, userDisplayName } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -9,6 +9,16 @@ import type { Chat, ID, User } from "@/types";
 import { Avatar } from "./Avatar";
 import { Composer, type ComposerHandle } from "./Composer";
 import { MessageList } from "./MessageList";
+import {
+  FingerprintDialog,
+  HeaderMenu,
+  OtherDeviceBanner,
+  SecretInviteCard,
+  SecretWaitingCard,
+  secretViewOf,
+  type MenuItem,
+} from "./SecretChatPanels";
+import { Spinner } from "./Spinner";
 
 const EMPTY: ID[] = [];
 
@@ -71,12 +81,17 @@ function Subtitle({ chat, me, typingIds }: { chat: Chat; me: User; typingIds: ID
 interface Props {
   chatId: ID | null;
   onBack: () => void;
+  onOpenChat: (id: ID) => void;
 }
 
-export function Conversation({ chatId, onBack }: Props) {
+export function Conversation({ chatId, onBack, onOpenChat }: Props) {
   const me = useChatStore((s) => s.me);
   const chat = useChatStore((s) => (chatId ? s.chats.find((c) => c.id === chatId) : undefined));
   const typingIds = useChatStore((s) => (chatId ? (s.typing[chatId] ?? EMPTY) : EMPTY));
+  const hasKey = useChatStore((s) => (chatId ? s.secretKeys[chatId] : undefined));
+  const startSecretChat = useChatStore((s) => s.startSecretChat);
+  const deleteChat = useChatStore((s) => s.deleteChat);
+  const [fpOpen, setFpOpen] = useState(false);
   const composer = useRef<ComposerHandle>(null);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -84,6 +99,7 @@ export function Conversation({ chatId, onBack }: Props) {
   useEffect(() => {
     dragDepth.current = 0;
     setDragging(false);
+    setFpOpen(false);
   }, [chatId]);
 
   if (!chatId || !chat || !me) {
@@ -101,18 +117,47 @@ export function Conversation({ chatId, onBack }: Props) {
   const title = chatTitle(chat, me.id);
   const peer = peerOf(chat, me.id);
   const isGroup = chat.type === "group";
+  const isSecret = chat.type === "secret";
+  const view = secretViewOf(chat, me.id, hasKey);
+  const canCompose = view === "none" || view === "active";
+  const peerName = userDisplayName(peer) || title;
+
+  const menu: MenuItem[] = [];
+  if (chat.type === "direct" && peer && peer.id !== me.id) {
+    menu.push({
+      label: t.startSecretChat,
+      icon: <Lock size={18} className="text-teal-600 dark:text-teal-400" />,
+      onClick: async () => {
+        const c = await startSecretChat(peer.id);
+        if (c) onOpenChat(c.id);
+      },
+    });
+  }
+  if (isSecret) {
+    if (view === "active") {
+      menu.push({ label: t.encryptionKey, icon: <KeyRound size={18} />, onClick: () => setFpOpen(true) });
+    }
+    menu.push({
+      label: t.deleteSecretChat,
+      icon: <Trash2 size={18} />,
+      danger: true,
+      onClick: async () => {
+        if (window.confirm(t.deleteSecretConfirm)) await deleteChat(chat.id);
+      },
+    });
+  }
 
   return (
     <div
       className="chat-wallpaper relative flex h-full min-w-0 flex-col"
       onDragEnter={(e) => {
-        if (!hasFiles(e)) return;
+        if (!hasFiles(e) || !canCompose) return;
         e.preventDefault();
         dragDepth.current++;
         setDragging(true);
       }}
       onDragOver={(e) => {
-        if (!hasFiles(e)) return;
+        if (!hasFiles(e) || !canCompose) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
       }}
@@ -146,15 +191,50 @@ export function Conversation({ chatId, onBack }: Props) {
           size={42}
         />
         <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold leading-tight text-slate-900 dark:text-white">{title}</div>
+          <div
+            className={`flex items-center gap-1.5 font-semibold leading-tight ${
+              isSecret ? "text-teal-700 dark:text-teal-300" : "text-slate-900 dark:text-white"
+            }`}
+          >
+            {isSecret && (
+              <button
+                onClick={() => view === "active" && setFpOpen(true)}
+                className={`-m-1 shrink-0 rounded-full p-1 ${view === "active" ? "hover:bg-teal-50 dark:hover:bg-teal-400/10" : "cursor-default"}`}
+                aria-label={t.encryptionKey}
+                title={view === "active" ? t.encryptionKey : t.secretChat}
+              >
+                <Lock size={15} strokeWidth={2.6} />
+              </button>
+            )}
+            <span className="truncate">{title}</span>
+          </div>
           <div className="truncate text-[13px] leading-tight">
             <Subtitle chat={chat} me={me} typingIds={typingIds} />
           </div>
         </div>
+        <HeaderMenu items={menu} />
       </header>
+      {isSecret && <div className="h-0.5 bg-gradient-to-r from-teal-400 via-emerald-500 to-teal-400" aria-hidden />}
 
-      <MessageList key={`list-${chat.id}`} chat={chat} meId={me.id} />
-      <Composer key={`composer-${chat.id}`} chatId={chat.id} ref={composer} />
+      {view === "checking" ? (
+        <div className="flex flex-1 items-center justify-center text-teal-500">
+          <Spinner size={28} />
+        </div>
+      ) : view === "waiting" ? (
+        <SecretWaitingCard peerName={peerName} />
+      ) : view === "invite" ? (
+        <SecretInviteCard chat={chat} peerName={peerName} />
+      ) : (
+        <MessageList key={`list-${chat.id}`} chat={chat} meId={me.id} />
+      )}
+      {canCompose ? (
+        <Composer key={`composer-${chat.id}`} chatId={chat.id} ref={composer} />
+      ) : view === "otherDevice" ? (
+        <OtherDeviceBanner />
+      ) : null}
+      {isSecret && (
+        <FingerprintDialog open={fpOpen} onClose={() => setFpOpen(false)} chat={chat} peerName={peerName} />
+      )}
 
       {dragging && (
         <div className="animate-fade-in pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-sky-50/80 p-4 backdrop-blur-sm dark:bg-app-dark/80">

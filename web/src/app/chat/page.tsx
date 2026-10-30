@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { onUnauthorized } from "@/lib/api";
 import { clearSession, getCachedUser, getToken } from "@/lib/auth";
+import { wipeAllKeys } from "@/lib/e2e";
 import { useChatStore } from "@/lib/store";
 import type { ID } from "@/types";
 import { Conversation } from "@/components/Conversation";
@@ -120,7 +121,9 @@ export default function ChatPage() {
     document.title = unread > 0 ? `(${unread}) Nokat Chat` : "Nokat Chat";
   }, [unread]);
 
-  const logout = () => {
+  const logout = async () => {
+    // Secret chats are bound to this device: drop every private key on logout.
+    await wipeAllKeys();
     clearSession();
     useChatStore.getState().teardown();
     router.replace("/");
@@ -145,7 +148,7 @@ export default function ChatPage() {
       </div>
 
       <section className={`h-full min-w-0 flex-1 ${activeChatId ? "block" : "hidden md:block"}`}>
-        <Conversation chatId={activeChatId} onBack={closeChat} />
+        <Conversation chatId={activeChatId} onBack={closeChat} onOpenChat={openChat} />
       </section>
 
       <NewChatDialog

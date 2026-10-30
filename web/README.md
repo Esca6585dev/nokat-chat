@@ -36,6 +36,7 @@ hint (tap it to auto-fill).
 npm run build
 npm start          # or: node .next/standalone/server.js (copy public/ and .next/static/ next to it)
 npm run lint
+npm run test:e2e   # secret-chat crypto vs ../docs/secret-chat-test-vectors.json (Node 22+)
 ```
 
 ### Docker
@@ -80,6 +81,12 @@ public/logo.svg       # brand logo / favicon
 - Photos & files: paperclip picker (multiple), drag & drop onto the conversation, paste images; preview tray
   with optional caption (sent with the first attachment); XHR upload with progress ring + cancel, retry on
   failure; 20 MB client-side limit; image bubbles with lightbox + download, file cards with download link
+- Secret chats (end-to-end encrypted, see `../docs/SECRET_CHATS.md`): P-256 ECDH + HKDF-SHA256 +
+  AES-256-GCM via WebCrypto only. Per-chat non-extractable private keys live in IndexedDB
+  (`nokat-e2e`/`keys`) and are wiped on logout or when the chat is deleted; plaintext is kept in memory
+  only. Invitation / accept / decline flow, key fingerprint dialog, encrypted photos & files.
+  Crypto core: `src/lib/e2e-core.ts` (shared with the Node self-test in `scripts/e2e-vectors.test.mjs`).
+  Note: WebCrypto requires a secure context (HTTPS or localhost).
 - Realtime: `message.new`, `message.read`, `chat.new`, `typing`, `presence`; reconnect + refetch
 - Read receipts only while the chat is open and the window is focused
 - Light/dark theme via `prefers-color-scheme`, responsive down to phone widths
