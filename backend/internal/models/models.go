@@ -24,6 +24,10 @@ type OTPCode struct {
 const (
 	ChatDirect = "direct"
 	ChatGroup  = "group"
+	ChatSecret = "secret" // end-to-end encrypted 1:1 chat, see docs/SECRET_CHATS.md
+
+	SecretPending = "pending"
+	SecretActive  = "active"
 )
 
 type Chat struct {
@@ -32,8 +36,13 @@ type Chat struct {
 	Title     string  `gorm:"size:64"`
 	AvatarURL string  `gorm:"size:512"`
 	DirectKey *string `gorm:"uniqueIndex;size:80"` // "<minUserID>:<maxUserID>" for direct chats
-	CreatedAt time.Time
-	UpdatedAt time.Time `gorm:"index"`
+	// Secret chats only. Keys are per-chat P-256 public keys (base64 raw point); private keys never reach the server.
+	SecretState  string `gorm:"size:10"`
+	InitiatorID  string `gorm:"size:36"`
+	InitiatorKey string `gorm:"size:100"`
+	PeerKey      string `gorm:"size:100"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time `gorm:"index"`
 }
 
 type ChatMember struct {
@@ -48,6 +57,7 @@ type Message struct {
 	ChatID       string    `gorm:"size:36;not null;index:idx_chat_created,priority:1"`
 	SenderID     string    `gorm:"size:36;not null"`
 	Text         string    `gorm:"type:text;not null"`
+	Ciphertext   string    `gorm:"type:text"` // secret chats: opaque client-encrypted payload
 	ClientID     string    `gorm:"size:64"`
 	AttachmentID *string   `gorm:"size:36;uniqueIndex"`
 	CreatedAt    time.Time `gorm:"not null;index:idx_chat_created,priority:2"`

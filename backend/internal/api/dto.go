@@ -26,6 +26,7 @@ type MessageDTO struct {
 	Kind       string         `json:"kind"`
 	Text       string         `json:"text"`
 	Attachment *AttachmentDTO `json:"attachment"`
+	Ciphertext string         `json:"ciphertext"`
 	ClientID   string         `json:"client_id,omitempty"`
 	Status     string         `json:"status"`
 	CreatedAt  time.Time      `json:"created_at"`
@@ -37,9 +38,17 @@ type ChatDTO struct {
 	Title       string      `json:"title"`
 	AvatarURL   string      `json:"avatar_url"`
 	Members     []UserDTO   `json:"members"`
+	Secret      *SecretDTO  `json:"secret"`
 	LastMessage *MessageDTO `json:"last_message"`
 	UnreadCount int64       `json:"unread_count"`
 	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
+type SecretDTO struct {
+	State        string `json:"state"`
+	InitiatorID  string `json:"initiator_id"`
+	InitiatorKey string `json:"initiator_key"`
+	PeerKey      string `json:"peer_key"`
 }
 
 func (s *Server) userDTO(u models.User) UserDTO {
@@ -84,13 +93,16 @@ func messageDTO(m models.Message, members []models.ChatMember, uploads map[strin
 	}
 	dto := MessageDTO{
 		ID: m.ID, ChatID: m.ChatID, SenderID: m.SenderID, Kind: "text", Text: m.Text,
-		ClientID: m.ClientID, Status: status, CreatedAt: m.CreatedAt.UTC(),
+		ClientID: m.ClientID, Status: status, CreatedAt: m.CreatedAt.UTC(), Ciphertext: m.Ciphertext,
 	}
 	if m.AttachmentID != nil {
 		if u, ok := uploads[*m.AttachmentID]; ok {
 			a := attachmentDTO(u)
 			dto.Attachment, dto.Kind = &a, a.Kind
 		}
+	}
+	if m.Ciphertext != "" {
+		dto.Kind = "encrypted" // real kind lives inside the ciphertext
 	}
 	return dto
 }
@@ -157,6 +169,10 @@ func (s *Server) buildChats(uid string, chatIDs []string) ([]ChatDTO, error) {
 		dto := ChatDTO{
 			ID: c.ID, Type: c.Type, Title: c.Title, AvatarURL: c.AvatarURL,
 			Members: make([]UserDTO, 0, len(cms)), UnreadCount: unreadByChat[c.ID], UpdatedAt: c.UpdatedAt.UTC(),
+		}
+		if c.Type == models.ChatSecret {
+			dto.Secret = &SecretDTO{State: c.SecretState, InitiatorID: c.InitiatorID,
+				InitiatorKey: c.InitiatorKey, PeerKey: c.PeerKey}
 		}
 		for _, cm := range cms {
 			if u, ok := userByID[cm.UserID]; ok {

@@ -80,11 +80,9 @@ func (s *Server) wsHandler(conn *websocket.Conn) {
 
 func (s *Server) handleInbound(c *hub.Client, in inbound) {
 	var d struct {
-		ChatID   string `json:"chat_id"`
-		Text     string `json:"text"`
-		ClientID string `json:"client_id"`
-		Typing   bool   `json:"typing"`
-		AttachID string `json:"attachment_id"`
+		outgoing
+		ChatID string `json:"chat_id"`
+		Typing bool   `json:"typing"`
 	}
 	_ = json.Unmarshal(in.Data, &d)
 	switch in.Type {
@@ -94,7 +92,7 @@ func (s *Server) handleInbound(c *hub.Client, in inbound) {
 		default:
 		}
 	case "message.send":
-		if _, err := s.sendMessage(c.UserID, d.ChatID, d.Text, d.ClientID, d.AttachID); err != nil {
+		if _, err := s.sendMessage(c.UserID, d.ChatID, d.outgoing); err != nil {
 			log.Printf("ws message.send from %s: %v", c.UserID, err)
 		}
 	case "typing":

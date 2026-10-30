@@ -127,6 +127,11 @@ Client → server:
 
 Clients should reconnect with exponential backoff (1 s → 30 s) and refetch `/chats` after reconnecting.
 
+## Secret chats (end-to-end encrypted)
+
+See [`SECRET_CHATS.md`](SECRET_CHATS.md): `type: "secret"` chats, `Chat.secret`, `Message.ciphertext`,
+`POST /chats/secret`, `POST /chats/:id/secret/accept`, `DELETE /chats/:id`, WS `chat.updated` / `chat.deleted`.
+
 ## Health
 `GET /health` → `{"status":"ok"}`
 

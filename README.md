@@ -16,6 +16,7 @@
 - Profile setup (name, @username, bio)
 - Direct chats and groups, user search by name / username / phone
 - Photo and file sharing (up to 20 MB) with previews, upload progress and a fullscreen viewer
+- **Secret chats** with end-to-end encryption (P-256 ECDH + AES-256-GCM): the server stores only ciphertext — see [`docs/SECRET_CHATS.md`](docs/SECRET_CHATS.md)
 - Realtime messages over WebSocket, multi-device per user
 - Typing indicator, online / last-seen presence, ✓ sent / ✓✓ read receipts, unread counters
 - Message history with pagination, optimistic sending with dedupe (`client_id`)

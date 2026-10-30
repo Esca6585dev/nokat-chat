@@ -191,15 +191,11 @@ func (s *Server) listMessages(c *fiber.Ctx) error {
 }
 
 func (s *Server) postMessage(c *fiber.Ctx) error {
-	var body struct {
-		Text         string `json:"text"`
-		ClientID     string `json:"client_id"`
-		AttachmentID string `json:"attachment_id"`
-	}
+	var body outgoing
 	if err := c.BodyParser(&body); err != nil {
 		return bad("nädogry sorag")
 	}
-	msg, err := s.sendMessage(uid(c), c.Params("id"), body.Text, body.ClientID, body.AttachmentID)
+	msg, err := s.sendMessage(uid(c), c.Params("id"), body)
 	if err != nil {
 		return err
 	}
@@ -229,19 +225,45 @@ func (s *Server) memberIDs(chatID string) []string {
 }
 
 // sendMessage is shared by REST and WebSocket so both paths behave identically.
-func (s *Server) sendMessage(senderID, chatID, text, clientID, attachmentID string) (MessageDTO, error) {
-	text = strings.TrimSpace(text)
-	if text == "" && attachmentID == "" {
-		return MessageDTO{}, bad("hat boş")
+type outgoing struct {
+	Text         string `json:"text"`
+	ClientID     string `json:"client_id"`
+	AttachmentID string `json:"attachment_id"`
+	Ciphertext   string `json:"ciphertext"`
+}
+
+func (s *Server) sendMessage(senderID, chatID string, in outgoing) (MessageDTO, error) {
+	text, clientID, attachmentID := strings.TrimSpace(in.Text), in.ClientID, in.AttachmentID
+	if err := s.ensureMember(senderID, chatID); err != nil {
+		return MessageDTO{}, err
 	}
-	if utf8.RuneCountInString(text) > maxMessageLen {
-		return MessageDTO{}, bad("hat gaty uzyn")
+	var chat models.Chat
+	if err := s.db.First(&chat, "id = ?", chatID).Error; err != nil {
+		return MessageDTO{}, err
+	}
+	if chat.Type == models.ChatSecret {
+		if chat.SecretState != models.SecretActive {
+			return MessageDTO{}, fiber.NewError(fiber.StatusConflict, "gizlin söhbet entek kabul edilmedi")
+		}
+		if text != "" {
+			return MessageDTO{}, bad("gizlin söhbetde açyk tekst iberip bolmaýar")
+		}
+		if err := validCiphertext(in.Ciphertext); err != nil {
+			return MessageDTO{}, err
+		}
+	} else {
+		if in.Ciphertext != "" {
+			return MessageDTO{}, bad("ciphertext diňe gizlin söhbetde")
+		}
+		if text == "" && attachmentID == "" {
+			return MessageDTO{}, bad("hat boş")
+		}
+		if utf8.RuneCountInString(text) > maxMessageLen {
+			return MessageDTO{}, bad("hat gaty uzyn")
+		}
 	}
 	if len(clientID) > 64 {
 		clientID = clientID[:64]
-	}
-	if err := s.ensureMember(senderID, chatID); err != nil {
-		return MessageDTO{}, err
 	}
 	var members []models.ChatMember
 	if err := s.db.Where("chat_id = ?", chatID).Find(&members).Error; err != nil {
@@ -275,7 +297,7 @@ func (s *Server) sendMessage(senderID, chatID, text, clientID, attachmentID stri
 	s.db.Model(&models.Message{}).Where("chat_id = ?", chatID).Count(&prior)
 
 	now := time.Now().UTC()
-	msg := models.Message{ID: uuid.NewString(), ChatID: chatID, SenderID: senderID, Text: text, ClientID: clientID, AttachmentID: attachment, CreatedAt: now}
+	msg := models.Message{ID: uuid.NewString(), ChatID: chatID, SenderID: senderID, Text: text, Ciphertext: in.Ciphertext, ClientID: clientID, AttachmentID: attachment, CreatedAt: now}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&msg).Error; err != nil {
 			return err
@@ -295,7 +317,7 @@ func (s *Server) sendMessage(senderID, chatID, text, clientID, attachmentID stri
 		ids = append(ids, m.UserID)
 	}
 	// First message of a direct chat: the peer hasn't seen this chat yet.
-	if prior == 0 {
+	if prior == 0 && chat.Type != models.ChatSecret {
 		for _, id := range ids {
 			if id == senderID {
 				continue
