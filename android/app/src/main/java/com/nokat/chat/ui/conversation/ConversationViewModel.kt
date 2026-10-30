@@ -14,16 +14,22 @@ import com.nokat.chat.data.model.Chat
 import com.nokat.chat.data.model.Message
 import com.nokat.chat.data.model.MessageKind
 import com.nokat.chat.data.model.MessageStatus
+import com.nokat.chat.data.model.SecretFile
+import com.nokat.chat.data.model.SecretPayload
 import com.nokat.chat.data.model.User
 import com.nokat.chat.data.model.displayName
 import com.nokat.chat.data.model.displayTitle
 import com.nokat.chat.data.model.peer
-import com.nokat.chat.data.realtime.WsEvent
 import com.nokat.chat.data.realtime.RealtimeClient
+import com.nokat.chat.data.realtime.WsEvent
 import com.nokat.chat.data.remote.FileUrls
 import com.nokat.chat.data.remote.httpCode
 import com.nokat.chat.data.remote.toUiText
 import com.nokat.chat.data.repo.ChatRepository
+import com.nokat.chat.data.repo.Decrypted
+import com.nokat.chat.data.repo.FileTooBigException
+import com.nokat.chat.data.repo.SecretAccess
+import com.nokat.chat.data.repo.SecretChatManager
 import com.nokat.chat.data.session.SessionManager
 import com.nokat.chat.util.AttachmentReader
 import com.nokat.chat.util.TimeFormatter
@@ -63,6 +69,8 @@ sealed interface ConvItem {
     data class Msg(
         override val key: String,
         val message: Message,
+        /** Text to show: the message text, or the decrypted text/caption in secret chats. */
+        val text: String,
         val outgoing: Boolean,
         val time: String,
         /** Sender name above the first bubble of a run (incoming group messages only). */
@@ -74,20 +82,29 @@ sealed interface ConvItem {
         val lastInRun: Boolean,
         /** Photo / file payload, null for plain text. */
         val attachment: AttachmentUi? = null,
+        /** Secret chat: the ciphertext could not be decrypted ("⚠️ Hat açylmady"). */
+        val decryptFailed: Boolean = false,
+        /** Secret chat: this device has no key, content stays hidden ("🔒 Şifrlenen hat"). */
+        val locked: Boolean = false,
     ) : ConvItem
 }
 
 @Immutable
 data class AttachmentUi(
     val isImage: Boolean,
-    /** Coil model: the local `content://` Uri while we have it (no flicker after upload), else the remote URL. */
-    val previewModel: String,
-    /** Absolute download URL; null until the upload finished. */
+    /**
+     * Coil model: the local `content://` Uri while we have it (no flicker after upload), else the
+     * remote URL. Null for received secret files, which are loaded via [secretFile].
+     */
+    val previewModel: String?,
+    /** Absolute download URL; null until uploaded, and always null in secret chats (blob is encrypted). */
     val remoteUrl: String?,
     val name: String,
     val sizeText: String,
     val width: Int,
     val height: Int,
+    /** Secret chats: decrypted `file` object (blob URL + key) used to download and decrypt. */
+    val secretFile: SecretFile? = null,
 )
 
 @Immutable
@@ -107,6 +124,12 @@ data class ConversationHeader(
     val avatarUrl: String,
     val isGroup: Boolean,
     val status: HeaderStatus,
+    val isSecret: Boolean = false,
+    val secretAccess: SecretAccess? = null,
+    /** Active secret chats: `XXXX XXXX …` (8 groups). */
+    val fingerprint: String? = null,
+    /** Direct (non-secret) chats offer "start secret chat" with the peer. */
+    val canStartSecret: Boolean = false,
 )
 
 @Immutable
@@ -117,6 +140,14 @@ data class PagingState(
     val error: UiText? = null,
 )
 
+sealed interface ConversationEvent {
+    /** The chat no longer exists (secret chat deleted): leave the screen. */
+    data object Close : ConversationEvent
+    data class OpenChat(val chatId: String) : ConversationEvent
+    /** Decrypted secret file exported via FileProvider. */
+    data class OpenFile(val uri: Uri, val mime: String) : ConversationEvent
+}
+
 class ConversationViewModel(
     private val chatId: String,
     private val chats: ChatRepository,
@@ -125,6 +156,7 @@ class ConversationViewModel(
     private val timeFormatter: TimeFormatter,
     private val fileUrls: FileUrls,
     private val attachmentReader: AttachmentReader,
+    private val secret: SecretChatManager,
 ) : ViewModel() {
 
     private val myId: String? get() = session.currentUser?.id
@@ -139,23 +171,35 @@ class ConversationViewModel(
         .map { list -> list.firstOrNull { it.id == chatId } }
         .distinctUntilChanged()
 
-    val items: StateFlow<List<ConvItem>> = combine(messages, chatFlow) { list, chat ->
-        buildItems(list, chat)
+    /** Secret chats: the derived AES chat key (memory only). */
+    private val chatKey = MutableStateFlow<ByteArray?>(null)
+
+    val items: StateFlow<List<ConvItem>> = combine(messages, chatFlow, chatKey, secret.version) { list, chat, key, _ ->
+        buildItems(list, chat, key)
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val header: StateFlow<ConversationHeader?> = combine(chatFlow, chats.typing) { chat, typing ->
+    val header: StateFlow<ConversationHeader?> = combine(chatFlow, chats.typing, secret.version) { chat, typing, _ ->
         chat?.let { buildHeader(it, typing[chatId].orEmpty()) }
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** True while an active secret chat's key is still being unwrapped/derived. */
+    val keyLoading: StateFlow<Boolean> = combine(chatFlow, chatKey, secret.version) { chat, key, _ ->
+        chat != null && chat.isSecret && key == null && secret.access(chat, myId) == SecretAccess.ACTIVE
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** Fired when the list should jump to the newest message (e.g. after sending). */
     private val _scrollToBottom = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val scrollToBottom: SharedFlow<Unit> = _scrollToBottom.asSharedFlow()
 
     var draft by mutableStateOf("")
+        private set
+
+    /** Accept / decline / delete / start of a secret chat in progress. */
+    var secretBusy by mutableStateOf(false)
         private set
 
     /** clientId → upload progress 0..1 (absent = not uploading / unknown). Read per bubble. */
@@ -167,9 +211,15 @@ class ConversationViewModel(
     private val _notices = Channel<UiText>(Channel.BUFFERED)
     val notices: Flow<UiText> = _notices.receiveAsFlow()
 
+    private val _events = Channel<ConversationEvent>(Channel.BUFFERED)
+    val events: Flow<ConversationEvent> = _events.receiveAsFlow()
+
     private var resumed = false
     private var typingSentAt = 0L
     private var typingStopJob: Job? = null
+
+    @Volatile
+    private var isSecretChat = false
 
     init {
         viewModelScope.launch {
@@ -179,6 +229,22 @@ class ConversationViewModel(
                 throw e
             } catch (e: Exception) {
                 // Header stays empty; messages may still load.
+            }
+        }
+        // Secret chats: derive the chat key once the chat is active and this device owns it.
+        viewModelScope.launch {
+            combine(chatFlow, secret.version) { chat, _ -> chat }.collect { chat ->
+                if (chat != null && chat.isSecret) {
+                    isSecretChat = true
+                    if (chatKey.value == null && secret.access(chat, myId) == SecretAccess.ACTIVE) {
+                        chatKey.value = secret.chatKey(chat)
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            chats.removedChats.collect { removed ->
+                if (removed == chatId) _events.send(ConversationEvent.Close)
             }
         }
         viewModelScope.launch { realtime.events.collect { onEvent(it) } }
@@ -202,6 +268,8 @@ class ConversationViewModel(
     override fun onCleared() {
         chats.clearActiveChat(chatId)
         if (typingSentAt != 0L) chats.sendTyping(chatId, false)
+        // Decrypted copies handed to other apps only live while the chat is open.
+        if (isSecretChat) secret.clearOpenedFiles()
     }
 
     // ---- Loading ----
@@ -287,6 +355,86 @@ class ConversationViewModel(
         }
     }
 
+    // ---- Secret chat actions ----
+
+    /** False for secret chats this device cannot write to (pending, other device, key not ready). */
+    private fun canSend(): Boolean {
+        val chat = chats.chatOrNull(chatId) ?: return true
+        if (!chat.isSecret) return true
+        return secret.access(chat, myId) == SecretAccess.ACTIVE && chatKey.value != null
+    }
+
+    fun acceptSecretChat() {
+        if (secretBusy) return
+        secretBusy = true
+        viewModelScope.launch {
+            try {
+                secret.acceptSecretChat(chatId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _notices.send(
+                    if (e.httpCode == 409) UiText.Res(R.string.secret_already_accepted) else e.toUiText(),
+                )
+            } finally {
+                secretBusy = false
+            }
+        }
+    }
+
+    /** Decline an invitation or delete an active secret chat (both sides). */
+    fun deleteSecretChat() {
+        if (secretBusy) return
+        secretBusy = true
+        viewModelScope.launch {
+            try {
+                secret.deleteSecretChat(chatId)
+                // ChatRepository.removedChats → Close.
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _notices.send(e.toUiText())
+            } finally {
+                secretBusy = false
+            }
+        }
+    }
+
+    /** From a direct chat: start a new secret chat with the same person. */
+    fun startSecretChat() {
+        if (secretBusy) return
+        val chat = chats.chatOrNull(chatId) ?: return
+        val peerId = chat.peer(myId)?.id ?: return
+        secretBusy = true
+        viewModelScope.launch {
+            try {
+                val created = secret.startSecretChat(peerId)
+                _events.send(ConversationEvent.OpenChat(created.id))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _notices.send(e.toUiText())
+            } finally {
+                secretBusy = false
+            }
+        }
+    }
+
+    /** Downloads + decrypts a secret photo/file for display (memory only). */
+    suspend fun loadSecretFile(file: SecretFile): ByteArray? = secret.loadFile(file)
+
+    fun openSecretFile(attachment: AttachmentUi) {
+        val file = attachment.secretFile ?: return
+        viewModelScope.launch {
+            val uri = secret.exportForViewing(file)
+            if (uri == null) {
+                _notices.send(UiText.Res(R.string.error_file_unreadable))
+            } else {
+                _events.send(ConversationEvent.OpenFile(uri, file.mime.ifEmpty { "application/octet-stream" }))
+            }
+        }
+    }
+
     // ---- Composer ----
 
     fun onDraftChange(value: String) {
@@ -318,7 +466,7 @@ class ConversationViewModel(
 
     fun send() {
         val text = draft.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty() || !canSend()) return
         val me = myId ?: return
         draft = ""
         stopTyping()
@@ -346,7 +494,7 @@ class ConversationViewModel(
 
     /** Photos/files picked in the composer. The current draft becomes the caption of the first one. */
     fun sendAttachments(uris: List<Uri>) {
-        if (uris.isEmpty()) return
+        if (uris.isEmpty() || !canSend()) return
         val me = myId ?: return
         viewModelScope.launch {
             val files = withContext(Dispatchers.IO) { uris.mapNotNull { attachmentReader.describe(it) } }
@@ -389,34 +537,80 @@ class ConversationViewModel(
     private suspend fun deliverNow(local: Message) {
         val clientId = local.clientIdOrNull ?: return
         try {
-            var attachmentId = local.attachment?.id
-            val file = local.localFile
-            if (attachmentId == null && file != null) {
-                uploadProgress[clientId] = 0f
-                val uploaded = chats.uploadAttachment(file) { fraction ->
-                    // Called on an OkHttp thread; hop to main for the snapshot state write.
-                    viewModelScope.launch { if (uploadProgress.containsKey(clientId)) uploadProgress[clientId] = fraction }
-                }
-                attachmentId = uploaded.id
-                messages.update { list ->
-                    list.map { if (it.clientIdOrNull == clientId) it.copy(attachment = uploaded) else it }
-                }
+            val chat = chats.chatOrNull(chatId)
+            val sent = if (chat != null && chat.isSecret) {
+                deliverSecret(local, clientId, chat)
+            } else {
+                deliverPlain(local, clientId)
             }
-            uploadProgress.remove(clientId)
-            val sent = chats.sendMessage(chatId, local.text, clientId, attachmentId)
             // If the server does not echo client_id, keep ours so the optimistic row is replaced.
             val fixed = if (sent.clientIdOrNull == null) sent.copy(clientId = clientId) else sent
             messages.update { merge(it, listOf(fixed)) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (e.httpCode == 413) _notices.trySend(UiText.Res(R.string.error_file_too_big_generic))
+            if (e is FileTooBigException || e.httpCode == 413) {
+                _notices.trySend(UiText.Res(R.string.error_file_too_big_generic))
+            }
             messages.update { list ->
                 list.map { if (it.clientIdOrNull == clientId && it.isPending) it.copy(failed = true) else it }
             }
         } finally {
             uploadProgress.remove(clientId)
         }
+    }
+
+    private suspend fun deliverPlain(local: Message, clientId: String): Message {
+        var attachmentId = local.attachment?.id
+        val file = local.localFile
+        if (attachmentId == null && file != null) {
+            uploadProgress[clientId] = 0f
+            val uploaded = chats.uploadAttachment(file, progressReporter(clientId))
+            attachmentId = uploaded.id
+            messages.update { list ->
+                list.map { if (it.clientIdOrNull == clientId) it.copy(attachment = uploaded) else it }
+            }
+        }
+        uploadProgress.remove(clientId)
+        return chats.sendMessage(chatId, local.text, clientId, attachmentId)
+    }
+
+    /**
+     * Secret chat: encrypt (and upload the encrypted blob of) the attachment, then send
+     * `{text: "", ciphertext, client_id, attachment_id?}`. Plaintext never leaves the device.
+     */
+    private suspend fun deliverSecret(local: Message, clientId: String, chat: Chat): Message {
+        val me = myId ?: throw IllegalStateException("not signed in")
+        val key = chatKey.value ?: secret.chatKey(chat) ?: throw IllegalStateException("no chat key")
+        var file = local.secretFile
+        val localFile = local.localFile
+        if (file == null && localFile != null) {
+            uploadProgress[clientId] = 0f
+            val uploaded = secret.encryptAndUpload(localFile, progressReporter(clientId))
+            file = uploaded
+            messages.update { list ->
+                list.map { if (it.clientIdOrNull == clientId) it.copy(secretFile = uploaded) else it }
+            }
+        }
+        uploadProgress.remove(clientId)
+        val kind = when {
+            file == null -> MessageKind.TEXT
+            local.kind == MessageKind.IMAGE -> MessageKind.IMAGE
+            else -> MessageKind.FILE
+        }
+        val ciphertext = secret.encryptPayload(chatId, key, me, SecretPayload(kind = kind, text = local.text, file = file))
+        return chats.sendMessage(
+            chatId = chatId,
+            text = "",
+            clientId = clientId,
+            attachmentId = file?.uploadId,
+            ciphertext = ciphertext,
+        )
+    }
+
+    /** Progress callback invoked on an OkHttp thread; hops to main for the snapshot state write. */
+    private fun progressReporter(clientId: String): (Float) -> Unit = { fraction ->
+        viewModelScope.launch { if (uploadProgress.containsKey(clientId)) uploadProgress[clientId] = fraction }
     }
 
     // ---- Pure helpers ----
@@ -431,8 +625,11 @@ class ConversationViewModel(
             val index = result.indexOfFirst { it.id == m.id || (cid != null && it.clientIdOrNull == cid) }
             if (index >= 0) {
                 val old = result[index]
-                // Keep the local file so the bubble keeps showing the already-decoded local preview.
-                val incoming = if (m.localFile == null && old.localFile != null) m.copy(localFile = old.localFile) else m
+                // Keep local-only data so the bubble keeps its already-decoded local preview.
+                val incoming = m.copy(
+                    localFile = m.localFile ?: old.localFile,
+                    secretFile = m.secretFile ?: old.secretFile,
+                )
                 result[index] = if (!old.isPending && MessageStatus.rank(old.status) > MessageStatus.rank(m.status)) {
                     incoming.copy(status = old.status)
                 } else {
@@ -445,10 +642,11 @@ class ConversationViewModel(
         return result.sortedBy { Timestamps.toMillis(it.createdAt) }
     }
 
-    private fun buildItems(list: List<Message>, chat: Chat?): List<ConvItem> {
+    private fun buildItems(list: List<Message>, chat: Chat?, key: ByteArray?): List<ConvItem> {
         if (list.isEmpty()) return emptyList()
         val me = myId
         val isGroup = chat?.isGroup == true
+        val isSecret = chat?.isSecret == true
         val members: Map<String, User> = chat?.members?.associateBy { it.id }.orEmpty()
         val days = LongArray(list.size) { timeFormatter.epochDay(list[it].createdAt) }
         val out = ArrayList<ConvItem>(list.size + 8)
@@ -462,11 +660,37 @@ class ConversationViewModel(
             val sameRunAsOlder = older != null && older.senderId == m.senderId && days[i - 1] == day
             val sameRunAsNewer = newer != null && newer.senderId == m.senderId && days[i + 1] == day
             val outgoing = m.senderId == me
-            val key = "m:" + (m.clientIdOrNull ?: m.id)
-            if (seen.add(key)) {
+            val key2 = "m:" + (m.clientIdOrNull ?: m.id)
+
+            // Secret chats: replace the opaque server message by its decrypted payload.
+            var text = m.text
+            var kind = m.kind
+            var secretFile = m.secretFile
+            var decryptFailed = false
+            var locked = false
+            if (isSecret && m.ciphertext.isNotEmpty()) {
+                when (val d = if (key != null) secret.decrypt(chatId, key, m) else null) {
+                    is Decrypted.Ok -> {
+                        text = d.payload.text
+                        kind = d.payload.kind
+                        secretFile = d.payload.file ?: secretFile
+                    }
+                    Decrypted.Failed -> {
+                        text = ""
+                        decryptFailed = true
+                    }
+                    null -> {
+                        text = ""
+                        locked = true
+                    }
+                }
+            }
+
+            if (seen.add(key2)) {
                 out += ConvItem.Msg(
-                    key = key,
+                    key = key2,
                     message = m,
+                    text = text,
                     outgoing = outgoing,
                     time = timeFormatter.messageTime(m.createdAt),
                     senderName = if (isGroup && !outgoing && !sameRunAsOlder) {
@@ -477,7 +701,9 @@ class ConversationViewModel(
                     senderSeed = m.senderId,
                     firstInRun = !sameRunAsOlder,
                     lastInRun = !sameRunAsNewer,
-                    attachment = attachmentUi(m),
+                    attachment = if (decryptFailed || locked) null else attachmentUi(m, kind, secretFile, isSecret),
+                    decryptFailed = decryptFailed,
+                    locked = locked,
                 )
             }
             if (i == 0 || days[i - 1] != day) {
@@ -488,15 +714,29 @@ class ConversationViewModel(
         return out
     }
 
-    private fun attachmentUi(m: Message): AttachmentUi? {
-        val remote = m.attachment
+    private fun attachmentUi(m: Message, kind: String, secretFile: SecretFile?, isSecret: Boolean): AttachmentUi? {
         val local = m.localFile
+        if (isSecret) {
+            if (secretFile == null && local == null) return null
+            if (local == null && kind != MessageKind.IMAGE && kind != MessageKind.FILE) return null
+            return AttachmentUi(
+                isImage = kind == MessageKind.IMAGE,
+                previewModel = local?.uri,
+                remoteUrl = null,
+                name = secretFile?.name?.takeIf { it.isNotEmpty() } ?: local?.name.orEmpty(),
+                sizeText = timeFormatter.fileSize(secretFile?.size ?: local?.size ?: -1L),
+                width = secretFile?.width?.takeIf { it > 0 } ?: local?.width ?: 0,
+                height = secretFile?.height?.takeIf { it > 0 } ?: local?.height ?: 0,
+                secretFile = secretFile,
+            )
+        }
+        val remote = m.attachment
         if (remote == null && local == null) return null
         val remoteUrl = remote?.url?.takeIf { it.isNotEmpty() }?.let { fileUrls.resolve(it) }
         val model = local?.uri ?: remoteUrl ?: return null
         val isImage = when {
-            m.kind == MessageKind.IMAGE -> true
-            m.kind == MessageKind.FILE -> false
+            kind == MessageKind.IMAGE -> true
+            kind == MessageKind.FILE -> false
             remote != null -> remote.kind == MessageKind.IMAGE
             else -> local?.isImage == true
         }
@@ -536,6 +776,10 @@ class ConversationViewModel(
             avatarUrl = if (chat.isGroup) chat.avatarUrl else peer?.avatarUrl.orEmpty(),
             isGroup = chat.isGroup,
             status = status,
+            isSecret = chat.isSecret,
+            secretAccess = secret.access(chat, me),
+            fingerprint = if (chat.isSecret) secret.fingerprint(chat) else null,
+            canStartSecret = !chat.isGroup && !chat.isSecret && peer != null && peer.id != me,
         )
     }
 

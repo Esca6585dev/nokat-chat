@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -43,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.nokat.chat.R
 import com.nokat.chat.data.model.Message
+import com.nokat.chat.data.model.SecretFile
 import com.nokat.chat.ui.common.MessageTicks
 import com.nokat.chat.ui.common.avatarAccent
 import com.nokat.chat.ui.theme.NokatTheme
@@ -51,6 +54,9 @@ private val BubbleRadius = 18.dp
 private val TailRadius = 5.dp
 private val ImageMaxWidth = 260.dp
 private val MediaCorner = 14.dp
+
+/** What the fullscreen viewer shows: a Coil model (URL, content Uri or decrypted bytes). */
+class ViewerImage(val model: Any, val name: String, val remoteUrl: String?)
 
 /**
  * One chat bubble: text, photo (+ optional caption) or file card (+ optional caption).
@@ -63,8 +69,9 @@ fun MessageBubble(
     item: ConvItem.Msg,
     progress: () -> Float?,
     onRetry: (Message) -> Unit,
-    onOpenImage: (AttachmentUi) -> Unit,
+    onOpenImage: (ViewerImage) -> Unit,
     onOpenFile: (AttachmentUi) -> Unit,
+    loadSecret: suspend (SecretFile) -> ByteArray?,
     modifier: Modifier = Modifier,
 ) {
     val colors = NokatTheme.colors
@@ -72,7 +79,7 @@ fun MessageBubble(
     val outgoing = item.outgoing
     val attachment = item.attachment
     val isImage = attachment?.isImage == true
-    val hasCaption = message.text.isNotBlank()
+    val hasCaption = item.text.isNotBlank()
     val uploading = attachment != null && message.isPending && !message.failed
     val uploadFraction = if (uploading) progress() else null
 
@@ -148,12 +155,19 @@ fun MessageBubble(
                         width = minOf(ImageMaxWidth, maxWidth - 6.dp),
                         uploading = uploading,
                         progress = uploadFraction,
-                        onClick = { if (message.failed) retry() else onOpenImage(attachment) },
+                        onClick = { model ->
+                            if (message.failed) {
+                                retry()
+                            } else if (model != null) {
+                                onOpenImage(ViewerImage(model, attachment.name, attachment.remoteUrl))
+                            }
+                        },
                         overlay = overlay,
+                        loadSecret = loadSecret,
                     )
                     if (hasCaption) {
                         TextWithMeta(
-                            text = message.text,
+                            text = item.text,
                             time = item.time,
                             outgoing = outgoing,
                             textColor = textColor,
@@ -174,7 +188,7 @@ fun MessageBubble(
                     )
                     if (hasCaption) {
                         TextWithMeta(
-                            text = message.text,
+                            text = item.text,
                             time = item.time,
                             outgoing = outgoing,
                             textColor = textColor,
@@ -190,10 +204,15 @@ fun MessageBubble(
                     }
                 }
                 else -> TextWithMeta(
-                    text = message.text,
+                    text = when {
+                        item.decryptFailed -> stringResource(R.string.secret_decrypt_failed)
+                        item.locked -> stringResource(R.string.secret_encrypted_preview)
+                        else -> item.text
+                    },
                     time = item.time,
                     outgoing = outgoing,
                     textColor = textColor,
+                    italic = item.decryptFailed || item.locked,
                     meta = { meta(metaColor) },
                 )
             }
@@ -219,6 +238,7 @@ private fun TextWithMeta(
     textColor: Color,
     meta: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    italic: Boolean = false,
 ) {
     val placeholder = "  " + time + if (outgoing) "   " else ""
     val body = remember(text, placeholder) {
@@ -231,7 +251,8 @@ private fun TextWithMeta(
         Text(
             text = body,
             style = MaterialTheme.typography.bodyLarge,
-            color = textColor,
+            color = if (italic) textColor.copy(alpha = 0.75f) else textColor,
+            fontStyle = if (italic) FontStyle.Italic else null,
         )
         Box(Modifier.align(Alignment.BottomEnd)) { meta() }
     }
@@ -270,9 +291,21 @@ private fun ImageContent(
     width: Dp,
     uploading: Boolean,
     progress: Float?,
-    onClick: () -> Unit,
+    onClick: (model: Any?) -> Unit,
     overlay: (@Composable () -> Unit)?,
+    loadSecret: suspend (SecretFile) -> ByteArray?,
 ) {
+    // Local preview (content Uri) or remote URL; received secret photos are downloaded and
+    // decrypted in memory, then shown from bytes.
+    val secretFile = attachment.secretFile
+    val secretBytes = if (attachment.previewModel == null && secretFile != null) {
+        produceState<SecretImage>(initialValue = SecretImage.Loading, secretFile.url) {
+            value = loadSecret(secretFile)?.let { SecretImage.Ready(it) } ?: SecretImage.Failed
+        }.value
+    } else {
+        null
+    }
+    val model: Any? = attachment.previewModel ?: (secretBytes as? SecretImage.Ready)?.bytes
     val ratio = if (attachment.width > 0 && attachment.height > 0) {
         (attachment.width.toFloat() / attachment.height).coerceIn(0.6f, 1.9f)
     } else {
@@ -284,14 +317,33 @@ private fun ImageContent(
             .aspectRatio(ratio)
             .clip(RoundedCornerShape(MediaCorner))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick),
+            .clickable { onClick(model) },
     ) {
-        AsyncImage(
-            model = attachment.previewModel,
-            contentDescription = attachment.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.matchParentSize(),
-        )
+        if (model != null) {
+            AsyncImage(
+                model = model,
+                contentDescription = attachment.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
+        when (secretBytes) {
+            SecretImage.Loading -> UploadIndicator(
+                progress = null,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(52.dp)
+                    .background(Color.Black.copy(alpha = 0.35f), CircleShape),
+                size = 40.dp,
+            )
+            SecretImage.Failed -> Text(
+                text = stringResource(R.string.secret_decrypt_failed),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.Center),
+            )
+            else -> Unit
+        }
         if (uploading) {
             UploadIndicator(
                 progress = progress,
@@ -421,4 +473,11 @@ fun DateChip(label: String, modifier: Modifier = Modifier) {
                 .padding(horizontal = 12.dp, vertical = 4.dp),
         )
     }
+}
+
+/** Loading state of a received secret photo. */
+private sealed interface SecretImage {
+    data object Loading : SecretImage
+    data object Failed : SecretImage
+    class Ready(val bytes: ByteArray) : SecretImage
 }

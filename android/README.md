@@ -113,6 +113,50 @@ com.nokat.chat
   - Tapping a photo opens a fullscreen viewer with pinch zoom, share and download. Tapping a file opens its URL with `ACTION_VIEW`.
 - **Language:** all UI strings are in Turkmen, in `res/values/strings.xml`.
 
+## Secret chats (end-to-end encryption)
+
+The client implements [`../docs/SECRET_CHATS.md`](../docs/SECRET_CHATS.md) v1. Like Telegram, each secret chat is bound to one device on each side.
+
+| Part | Where |
+|---|---|
+| Crypto: P-256 ECDH, HKDF-SHA256, AES-256-GCM with AAD `chat_id\|sender_id`, fingerprint | `data/crypto/SecretCrypto.kt` (pure JVM, no `android.*`) |
+| Per-chat private keys | `data/crypto/SecretKeyStore.kt`: PKCS#8 wrapped with an Android Keystore AES-256-GCM key (alias `nokat_e2e_wrap`) in app-private prefs |
+| Key lifecycle, decryption cache, encrypted files | `data/repo/SecretChatManager.kt` |
+
+- **Starting a chat:** "Gizlin söhbet aç" appears in the chat-list menu, in the new-chat screen, and in a direct chat's ⋮ menu.
+- **Accepting:** the peer sees an invitation with "Kabul et" or "Ret et". Accepting generates this device's key; declining deletes the chat.
+- **Active chats:**
+  - The header shows a teal lock. Tapping it shows the 8-group fingerprint ("Şifrleme açary") to compare with the other person.
+  - "Gizlin söhbeti poz" deletes the chat for both sides.
+  - Devices without the key see "🔒 Bu gizlin söhbet başga enjamda açyldy" and cannot send.
+- **Screen capture:** the window has `FLAG_SECURE` while a secret chat is open, so screenshots and recordings are blocked.
+- **Where plaintext lives:**
+  - Plaintext and derived chat keys are kept in memory only.
+  - Photos and files are encrypted with a random key per file and uploaded as `encrypted.bin`. They are downloaded and decrypted in memory for display.
+  - Opening a file in another app writes a decrypted copy to `cacheDir/secret/`, shared through `FileProvider`. That folder is wiped when the chat screen closes and on logout.
+- **Keys are deleted:** when a chat is deleted (`chat.deleted` or locally) and on logout, including the automatic logout after a 401.
+
+### Verifying the crypto on a plain JVM
+
+`tools/crypto-check/SecretCryptoCheck.java` is a 1:1 Java twin of `SecretCrypto.kt`. It checks against `docs/secret-chat-test-vectors.json`:
+
+- shared secret and chat key, from both sides
+- decrypting the vector ciphertext
+- re-encrypting with the fixed IV, which must reproduce the ciphertext byte for byte
+- that the wrong AAD is rejected
+- fingerprint
+- file blob, both directions
+- 300 random key pairs
+
+Run it with Java 11 or newer; no Android SDK is needed:
+
+```bash
+cd android/tools/crypto-check
+java SecretCryptoCheck.java ../../../docs/secret-chat-test-vectors.json   # prints ALL OK
+```
+
+The Kotlin file was also compiled with kotlinc 2.0.21 and run against the same vectors.
+
 ## Notes and limitations
 
 - There are no push notifications (FCM). The socket stays connected while the app process is alive and the user is signed in.

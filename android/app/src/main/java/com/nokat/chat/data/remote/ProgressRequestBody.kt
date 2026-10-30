@@ -50,3 +50,35 @@ class ContentUriRequestBody(
         const val BUFFER_SIZE = 16 * 1024
     }
 }
+
+/** In-memory body (e.g. an encrypted blob) that reports upload progress as 0..1 in ~1% steps. */
+class ByteArrayProgressBody(
+    private val bytes: ByteArray,
+    private val mediaType: MediaType?,
+    private val onProgress: (Float) -> Unit,
+) : RequestBody() {
+
+    override fun contentType(): MediaType? = mediaType
+
+    override fun contentLength(): Long = bytes.size.toLong()
+
+    override fun writeTo(sink: BufferedSink) {
+        val total = bytes.size
+        var written = 0
+        var lastReported = -1
+        while (written < total) {
+            val n = minOf(CHUNK, total - written)
+            sink.write(bytes, written, n)
+            written += n
+            val percent = ((written.toLong() * 100) / total).toInt()
+            if (percent != lastReported) {
+                lastReported = percent
+                onProgress(percent / 100f)
+            }
+        }
+    }
+
+    private companion object {
+        const val CHUNK = 16 * 1024
+    }
+}

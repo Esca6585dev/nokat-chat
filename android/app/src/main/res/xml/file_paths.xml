@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider roots: only decrypted secret-chat files that the user opens in another app.
+     The directory is wiped when the chat screen closes and on logout. -->
+<paths>
+    <cache-path name="secret" path="secret/" />
+</paths>

@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
 import com.nokat.chat.data.model.Chat
+import com.nokat.chat.data.model.ChatDeletedPayload
 import com.nokat.chat.data.model.Message
 import com.nokat.chat.data.model.PresencePayload
 import com.nokat.chat.data.model.ReadPayload
@@ -207,6 +208,10 @@ class RealtimeClient(
                 "message.read" -> json.decodeFromJsonElement(ReadPayload.serializer(), data)
                     .let { WsEvent.MessageRead(it.chatId, it.userId, it.readAt) }
                 "chat.new" -> WsEvent.ChatNew(json.decodeFromJsonElement(Chat.serializer(), data))
+                "chat.updated" -> WsEvent.ChatUpdated(json.decodeFromJsonElement(Chat.serializer(), data))
+                "chat.deleted" -> WsEvent.ChatDeleted(
+                    json.decodeFromJsonElement(ChatDeletedPayload.serializer(), data).chatId,
+                )
                 "typing" -> json.decodeFromJsonElement(TypingPayload.serializer(), data)
                     .let { WsEvent.Typing(it.chatId, it.userId, it.typing) }
                 "presence" -> json.decodeFromJsonElement(PresencePayload.serializer(), data)
@@ -214,7 +219,8 @@ class RealtimeClient(
                 else -> null // "pong" and unknown types
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Unparseable frame: ${e.message}")
+            // Only the exception type: messages may quote the frame (never log message content).
+            Log.w(TAG, "Unparseable frame: ${e.javaClass.simpleName}")
             null
         }
     }

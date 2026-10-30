@@ -14,6 +14,9 @@ import com.nokat.chat.data.model.displayTitle
 import com.nokat.chat.data.model.peer
 import com.nokat.chat.data.realtime.RealtimeClient
 import com.nokat.chat.data.repo.ChatRepository
+import com.nokat.chat.data.repo.Decrypted
+import com.nokat.chat.data.repo.SecretAccess
+import com.nokat.chat.data.repo.SecretChatManager
 import com.nokat.chat.data.session.SessionManager
 import com.nokat.chat.data.session.SessionState
 import com.nokat.chat.util.TimeFormatter
@@ -51,6 +54,11 @@ data class ChatItemUi(
     val avatarUrl: String,
     /** null → nobody typing; "" → peer typing (direct); name → member typing (group). */
     val typingName: String?,
+    val isSecret: Boolean = false,
+    /** Secret chats only. */
+    val secretAccess: SecretAccess? = null,
+    /** Secret chat whose last message cannot be decrypted here ("🔒 Şifrlenen hat"). */
+    val previewEncrypted: Boolean = false,
 )
 
 @Immutable
@@ -66,6 +74,7 @@ class ChatListViewModel(
     session: SessionManager,
     realtime: RealtimeClient,
     private val timeFormatter: TimeFormatter,
+    private val secret: SecretChatManager,
 ) : ViewModel() {
 
     var query by mutableStateOf("")
@@ -79,7 +88,8 @@ class ChatListViewModel(
         chats.typing,
         snapshotFlow { query },
         session.state,
-    ) { list, typing, q, s ->
+        secret.version,
+    ) { list, typing, q, s, _ ->
         val me = (s as? SessionState.LoggedIn)?.user?.id
         val mapped = list.map { toUi(it, me, typing[it.id].orEmpty()) }
         val needle = q.trim()
@@ -139,17 +149,43 @@ class ChatListViewModel(
         } else {
             null
         }
+        var preview: String? = last?.text?.replace('\n', ' ')
+        var previewKind = when {
+            last == null -> MessageKind.TEXT
+            last.kind == MessageKind.IMAGE || last.attachment?.kind == MessageKind.IMAGE -> MessageKind.IMAGE
+            last.kind == MessageKind.FILE || last.attachment != null -> MessageKind.FILE
+            else -> MessageKind.TEXT
+        }
+        var attachmentName: String? = last?.attachment?.name
+        var previewEncrypted = false
+        val access = if (chat.isSecret) secret.access(chat, me) else null
+        if (chat.isSecret && last != null) {
+            // Decrypt locally when this device can; otherwise "🔒 Şifrlenen hat". Memory only.
+            preview = null
+            previewKind = MessageKind.TEXT
+            attachmentName = null
+            previewEncrypted = true
+            if (access == SecretAccess.ACTIVE) {
+                val key = secret.cachedKey(chat.id)
+                if (key == null) {
+                    secret.ensureKeyAsync(chat) // re-emits via secret.version when ready
+                } else {
+                    val decrypted = secret.decrypt(chat.id, key, last)
+                    if (decrypted is Decrypted.Ok) {
+                        previewEncrypted = false
+                        preview = decrypted.payload.text.replace('\n', ' ')
+                        previewKind = decrypted.payload.kind
+                        attachmentName = decrypted.payload.file?.name
+                    }
+                }
+            }
+        }
         return ChatItemUi(
             id = chat.id,
             title = chat.displayTitle(me),
-            preview = last?.text?.replace('\n', ' '),
-            previewKind = when {
-                last == null -> MessageKind.TEXT
-                last.kind == MessageKind.IMAGE || last.attachment?.kind == MessageKind.IMAGE -> MessageKind.IMAGE
-                last.kind == MessageKind.FILE || last.attachment != null -> MessageKind.FILE
-                else -> MessageKind.TEXT
-            },
-            attachmentName = last?.attachment?.name,
+            preview = preview,
+            previewKind = previewKind,
+            attachmentName = attachmentName,
             lastFromMe = fromMe,
             lastSenderName = senderName,
             outgoingStatus = if (fromMe) last?.status else null,
@@ -160,6 +196,9 @@ class ChatListViewModel(
             avatarSeed = if (chat.isGroup) chat.id else peer?.id ?: chat.id,
             avatarUrl = if (chat.isGroup) chat.avatarUrl else peer?.avatarUrl.orEmpty(),
             typingName = typingName,
+            isSecret = chat.isSecret,
+            secretAccess = access,
+            previewEncrypted = previewEncrypted,
         )
     }
 }

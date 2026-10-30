@@ -8,6 +8,8 @@ import com.nokat.chat.data.model.Message
 import com.nokat.chat.data.model.OkResponse
 import com.nokat.chat.data.model.OtpRequest
 import com.nokat.chat.data.model.OtpResponse
+import com.nokat.chat.data.model.SecretAcceptRequest
+import com.nokat.chat.data.model.SecretChatRequest
 import com.nokat.chat.data.model.SendMessageRequest
 import com.nokat.chat.data.model.UpdateProfileRequest
 import com.nokat.chat.data.model.User
@@ -16,7 +18,9 @@ import com.nokat.chat.data.model.VerifyResponse
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import okhttp3.MultipartBody
+import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.PATCH
@@ -59,6 +63,18 @@ interface NokatApi {
 
     @POST("chats/group")
     suspend fun createGroupChat(@Body body: GroupChatRequest): Chat
+
+    /** Starts a new secret chat (always a new chat) → `201 Chat` with `secret.state = "pending"`. */
+    @POST("chats/secret")
+    suspend fun createSecretChat(@Body body: SecretChatRequest): Chat
+
+    /** Non-initiator accepts a pending secret chat (first device wins; 409 afterwards). */
+    @POST("chats/{id}/secret/accept")
+    suspend fun acceptSecretChat(@Path("id") chatId: String, @Body body: SecretAcceptRequest): Chat
+
+    /** Secret chats only: deletes the chat for both sides. The body (if any) is ignored. */
+    @DELETE("chats/{id}")
+    suspend fun deleteChat(@Path("id") chatId: String): Response<Unit>
 
     @GET("chats/{id}")
     suspend fun chat(@Path("id") id: String): Chat

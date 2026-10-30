@@ -93,6 +93,32 @@
     <string name="close">Ýap</string>
     <string name="uploading">Ýüklenýär…</string>
 
+    <!-- Secret chats -->
+    <string name="secret_chat">Gizlin söhbet</string>
+    <string name="secret_chat_start">Gizlin söhbet aç</string>
+    <string name="secret_chat_new_title">Täze gizlin söhbet</string>
+    <string name="secret_chat_new_hint">Kim bilen gizlin söhbet açmak isleýärsiňiz?</string>
+    <string name="secret_waiting">Garaşylýar…</string>
+    <string name="secret_waiting_body">Garaşylýar… %1$s kabul etmeli</string>
+    <string name="secret_waiting_hint">%1$s kabul eden badyna hatlar uçdan-uça şifrlener.</string>
+    <string name="secret_invite_preview">Gizlin söhbet çakylygy</string>
+    <string name="secret_invite_body">%1$s size gizlin söhbet teklip edýär. Hatlar diňe şu enjamda we onuň enjamynda okalyp biler.</string>
+    <string name="secret_accept">Kabul et</string>
+    <string name="secret_decline">Ret et</string>
+    <string name="secret_other_device">🔒 Bu gizlin söhbet başga enjamda açyldy</string>
+    <string name="secret_encrypted_preview">🔒 Şifrlenen hat</string>
+    <string name="secret_decrypt_failed">⚠️ Hat açylmady</string>
+    <string name="secret_delete">Gizlin söhbeti poz</string>
+    <string name="secret_delete_body">Gizlin söhbet we ähli hatlar iki tarapda hem pozular. Muny yzyna gaýtaryp bolmaýar.</string>
+    <string name="delete">Poz</string>
+    <string name="secret_key_title">Şifrleme açary</string>
+    <string name="secret_key_body">Bu belgini %1$s bilen deňeşdiriň (ýüzbe-ýüz ýa-da jaň arkaly). Belgiler gabat gelse, söhbetdeşligiňiz uçdan-uça şifrlenendir: hatlary diňe siziň iki enjamyňyz okap biler, hatda Nokat serweri hem okap bilmez.</string>
+    <string name="secret_key_show">Şifrleme açaryny görkez</string>
+    <string name="secret_e2e_badge">uçdan-uça şifrlenen</string>
+    <string name="secret_empty">🔒 Gizlin söhbet. Hatlar uçdan-uça şifrlenýär we diňe şu iki enjamda okalýar.</string>
+    <string name="secret_already_accepted">Bu çakylyk eýýäm başga enjamda kabul edildi</string>
+    <string name="ok">Bolýar</string>
+
     <!-- Errors -->
     <string name="error_network">Internet baglanyşygy ýok. Täzeden synanyşyň.</string>
     <string name="error_server">Serwerde näsazlyk ýüze çykdy</string>

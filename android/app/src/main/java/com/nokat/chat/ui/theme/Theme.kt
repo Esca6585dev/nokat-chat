@@ -108,6 +108,10 @@ data class NokatColors(
     val onDateChip: Color,
     val online: Color,
     val onTopBarSecondary: Color,
+    /** Secret-chat accent (lock icon, titles). */
+    val secret: Color,
+    /** Secret-chat accent on top of the blue top bar. */
+    val secretOnTopBar: Color,
 )
 
 private val OutgoingGradient = Brush.linearGradient(listOf(BrandPrimary, BrandBlue500))
@@ -129,6 +133,8 @@ private val LightNokatColors = NokatColors(
     onDateChip = BrandPrimaryDark,
     online = OnlineGreen,
     onTopBarSecondary = Color.White.copy(alpha = 0.78f),
+    secret = Color(0xFF0D9488),
+    secretOnTopBar = Color(0xFF5EEAD4),
 )
 
 private val DarkNokatColors = NokatColors(
@@ -148,6 +154,8 @@ private val DarkNokatColors = NokatColors(
     onDateChip = Slate300,
     online = OnlineGreen,
     onTopBarSecondary = Color.White.copy(alpha = 0.72f),
+    secret = Color(0xFF2DD4BF),
+    secretOnTopBar = Color(0xFF5EEAD4),
 )
 
 val LocalNokatColors = staticCompositionLocalOf { LightNokatColors }

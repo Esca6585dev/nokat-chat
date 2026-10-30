@@ -2,6 +2,7 @@ package com.nokat.chat.di
 
 import android.content.Context
 import com.nokat.chat.BuildConfig
+import com.nokat.chat.data.crypto.SecretKeyStore
 import com.nokat.chat.data.local.SessionStore
 import com.nokat.chat.data.realtime.RealtimeClient
 import com.nokat.chat.data.remote.AuthInterceptor
@@ -9,6 +10,7 @@ import com.nokat.chat.data.remote.FileUrls
 import com.nokat.chat.data.remote.NokatApi
 import com.nokat.chat.data.repo.AuthRepository
 import com.nokat.chat.data.repo.ChatRepository
+import com.nokat.chat.data.repo.SecretChatManager
 import com.nokat.chat.data.repo.UserRepository
 import com.nokat.chat.data.session.SessionManager
 import com.nokat.chat.data.session.SessionState
@@ -18,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -53,6 +56,8 @@ class AppContainer(context: Context) {
         .writeTimeout(30, TimeUnit.SECONDS)
         .addInterceptor(AuthInterceptor(sessionManager))
         .apply {
+            // Debug builds only, and BASIC = request/response lines only: bodies (ciphertext,
+            // tokens in JSON) are never logged. Release builds have no logging interceptor.
             if (BuildConfig.DEBUG) {
                 addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
             }
@@ -75,7 +80,23 @@ class AppContainer(context: Context) {
     val userRepository = UserRepository(api, json, sessionManager)
     val chatRepository = ChatRepository(api, json, realtime, sessionManager, appScope, appContext.contentResolver)
 
+    val secretChats = SecretChatManager(
+        context = appContext,
+        keyStore = SecretKeyStore(appContext),
+        chats = chatRepository,
+        session = sessionManager,
+        okHttp = okHttp,
+        fileUrls = fileUrls,
+        scope = appScope,
+    )
+
     init {
+        // Logout (explicit or 401): delete all secret-chat keys and decrypted caches.
+        appScope.launch {
+            sessionManager.state
+                .filter { it is SessionState.LoggedOut }
+                .collect { secretChats.wipeAll() }
+        }
         // Connect the socket while signed in; tear everything down on logout.
         appScope.launch {
             sessionManager.state

@@ -10,6 +10,7 @@ import com.nokat.chat.data.model.User
 import com.nokat.chat.data.model.peer
 import com.nokat.chat.data.remote.toUiText
 import com.nokat.chat.data.repo.ChatRepository
+import com.nokat.chat.data.repo.SecretChatManager
 import com.nokat.chat.data.repo.UserRepository
 import com.nokat.chat.data.session.SessionManager
 import com.nokat.chat.util.UiText
@@ -32,6 +33,9 @@ open class UserSearchViewModel(
     private val users: UserRepository,
     protected val chats: ChatRepository,
     private val session: SessionManager,
+    private val secretChats: SecretChatManager? = null,
+    /** Picking a user starts a secret chat instead of opening the direct chat. */
+    val secretMode: Boolean = false,
 ) : ViewModel() {
 
     var query by mutableStateOf("")
@@ -55,7 +59,7 @@ open class UserSearchViewModel(
         get() {
             val me = session.currentUser?.id
             return chats.chats.value
-                .filter { !it.isGroup }
+                .filter { !it.isGroup && !it.isSecret }
                 .mapNotNull { it.peer(me) }
                 .filter { it.id != me }
                 .distinctBy { it.id }
@@ -102,7 +106,11 @@ open class UserSearchViewModel(
         working = true
         viewModelScope.launch {
             try {
-                val chat = chats.openDirectChat(user.id)
+                val chat = if (secretMode && secretChats != null) {
+                    secretChats.startSecretChat(user.id)
+                } else {
+                    chats.openDirectChat(user.id)
+                }
                 _openChat.send(chat.id)
             } catch (e: CancellationException) {
                 throw e

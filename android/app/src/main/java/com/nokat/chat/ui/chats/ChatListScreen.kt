@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -63,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nokat.chat.R
 import com.nokat.chat.data.model.MessageKind
+import com.nokat.chat.data.repo.SecretAccess
 import com.nokat.chat.ui.common.Avatar
 import com.nokat.chat.ui.common.EmptyState
 import com.nokat.chat.ui.common.GradientTopBar
@@ -77,10 +80,11 @@ fun ChatListScreen(
     onOpenChat: (String) -> Unit,
     onNewChat: () -> Unit,
     onNewGroup: () -> Unit,
+    onNewSecretChat: () -> Unit,
     onSettings: () -> Unit,
 ) {
     val vm = nokatViewModel {
-        ChatListViewModel(it.chatRepository, it.sessionManager, it.realtime, it.timeFormatter)
+        ChatListViewModel(it.chatRepository, it.sessionManager, it.realtime, it.timeFormatter, it.secretChats)
     }
     val state by vm.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -139,6 +143,16 @@ fun ChatListScreen(
                                     onClick = {
                                         menuOpen = false
                                         onNewGroup()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.secret_chat_start)) },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Lock, contentDescription = null, tint = NokatTheme.colors.secret)
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        onNewSecretChat()
                                     },
                                 )
                                 DropdownMenuItem(
@@ -249,10 +263,19 @@ private fun ChatRow(item: ChatItemUi, onClick: () -> Unit, modifier: Modifier = 
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (item.isSecret) {
+                        Icon(
+                            Icons.Filled.Lock,
+                            contentDescription = stringResource(R.string.secret_chat),
+                            tint = NokatTheme.colors.secret,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
                     Text(
                         text = item.title,
                         style = MaterialTheme.typography.titleMedium,
-                        color = colors.onSurface,
+                        color = if (item.isSecret) NokatTheme.colors.secret else colors.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -302,6 +325,27 @@ private fun PreviewText(item: ChatItemUi, modifier: Modifier = Modifier) {
             },
             style = MaterialTheme.typography.bodyMedium,
             color = colors.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier,
+        )
+        return
+    }
+    val secretLine: String? = when {
+        item.secretAccess == SecretAccess.PENDING_OUTGOING -> stringResource(R.string.secret_waiting)
+        item.secretAccess == SecretAccess.PENDING_INCOMING -> stringResource(R.string.secret_invite_preview)
+        item.previewEncrypted -> stringResource(R.string.secret_encrypted_preview)
+        else -> null
+    }
+    if (secretLine != null) {
+        Text(
+            text = secretLine,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (item.secretAccess == SecretAccess.PENDING_INCOMING) {
+                NokatTheme.colors.secret
+            } else {
+                colors.onSurfaceVariant
+            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = modifier,

@@ -1,5 +1,7 @@
 package com.nokat.chat.ui.conversation
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -11,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +35,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,20 +61,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nokat.chat.R
+import com.nokat.chat.data.repo.SecretAccess
 import com.nokat.chat.ui.common.Avatar
 import com.nokat.chat.ui.common.GradientTopBar
+import com.nokat.chat.ui.common.SecureWindow
 import com.nokat.chat.ui.common.nokatViewModel
 import com.nokat.chat.ui.common.openUrl
 import com.nokat.chat.ui.theme.NokatTheme
@@ -78,7 +98,11 @@ private const val PREFETCH_DISTANCE = 8
 private const val MAX_PICK = 10
 
 @Composable
-fun ConversationScreen(chatId: String, onBack: () -> Unit) {
+fun ConversationScreen(
+    chatId: String,
+    onBack: () -> Unit,
+    onOpenChat: (String) -> Unit,
+) {
     val vm = nokatViewModel {
         ConversationViewModel(
             chatId = chatId,
@@ -88,6 +112,7 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
             timeFormatter = it.timeFormatter,
             fileUrls = it.fileUrls,
             attachmentReader = it.attachmentReader,
+            secret = it.secretChats,
         )
     }
     val rows by vm.items.collectAsStateWithLifecycle()
@@ -97,8 +122,37 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    var viewerImage by remember { mutableStateOf<AttachmentUi?>(null) }
+    var viewerImage by remember { mutableStateOf<ViewerImage?>(null) }
+    var showFingerprint by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val keyLoading by vm.keyLoading.collectAsStateWithLifecycle()
     val noAppText = stringResource(R.string.error_no_app_to_open)
+    val currentOnBack by rememberUpdatedState(onBack)
+    val currentOnOpenChat by rememberUpdatedState(onOpenChat)
+
+    val isSecret = header?.isSecret == true
+    val access = header?.secretAccess
+    // Like Telegram: no screenshots / screen recording / recents thumbnail of secret chats.
+    SecureWindow(enabled = isSecret)
+
+    LaunchedEffect(vm) {
+        vm.events.collect { event ->
+            when (event) {
+                ConversationEvent.Close -> currentOnBack()
+                is ConversationEvent.OpenChat -> currentOnOpenChat(event.chatId)
+                is ConversationEvent.OpenFile -> {
+                    val intent = Intent(Intent.ACTION_VIEW)
+                        .setDataAndType(event.uri, event.mime)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    try {
+                        context.startActivity(intent)
+                    } catch (e: ActivityNotFoundException) {
+                        Toast.makeText(context, noAppText, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
 
     // System Photo Picker (backported to API 26+ by androidx.activity) and the document picker.
     // Neither needs storage permissions.
@@ -146,7 +200,15 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
     val showScrollDown by remember { derivedStateOf { listState.firstVisibleItemIndex > 3 } }
 
     Scaffold(
-        topBar = { ConversationTopBar(header = header, onBack = onBack) },
+        topBar = {
+            ConversationTopBar(
+                header = header,
+                onBack = onBack,
+                onShowKey = { showFingerprint = true },
+                onStartSecret = vm::startSecretChat,
+                onDeleteSecret = { confirmDelete = true },
+            )
+        },
         containerColor = NokatTheme.colors.chatBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -188,10 +250,13 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
                                 onOpenImage = { viewerImage = it },
                                 onOpenFile = { attachment ->
                                     val url = attachment.remoteUrl
-                                    if (url != null && !context.openUrl(url)) {
+                                    if (attachment.secretFile != null) {
+                                        vm.openSecretFile(attachment)
+                                    } else if (url != null && !context.openUrl(url)) {
                                         Toast.makeText(context, noAppText, Toast.LENGTH_SHORT).show()
                                     }
                                 },
+                                loadSecret = { file -> vm.loadSecretFile(file) },
                                 modifier = Modifier.animateItem(),
                             )
                         }
@@ -211,7 +276,7 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
                 }
 
                 when {
-                    rows.isEmpty() && paging.loadingInitial ->
+                    rows.isEmpty() && (paging.loadingInitial || keyLoading) ->
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
                     rows.isEmpty() -> {
                         val error = paging.error
@@ -224,7 +289,9 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(
-                                text = error?.asString() ?: stringResource(R.string.empty_conversation),
+                                text = error?.asString() ?: stringResource(
+                                    if (isSecret) R.string.secret_empty else R.string.empty_conversation,
+                                ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = NokatTheme.colors.onDateChip,
                                 textAlign = TextAlign.Center,
@@ -251,25 +318,76 @@ fun ConversationScreen(chatId: String, onBack: () -> Unit) {
                 }
             }
 
-            Composer(
-                text = vm.draft,
-                onTextChange = vm::onDraftChange,
-                onSend = vm::send,
-                onPickPhoto = {
-                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
-                onPickFile = { filePicker.launch(arrayOf("*/*")) },
-            )
+            when (access) {
+                SecretAccess.PENDING_OUTGOING -> SecretStatusBar(
+                    text = stringResource(R.string.secret_waiting_body, header?.title.orEmpty()),
+                    hint = stringResource(R.string.secret_waiting_hint, header?.title.orEmpty()),
+                )
+                SecretAccess.PENDING_INCOMING -> SecretInvitation(
+                    name = header?.title.orEmpty(),
+                    busy = vm.secretBusy,
+                    onAccept = vm::acceptSecretChat,
+                    onDecline = vm::deleteSecretChat,
+                )
+                SecretAccess.NO_KEY -> SecretStatusBar(text = stringResource(R.string.secret_other_device), hint = null)
+                else -> Composer(
+                    text = vm.draft,
+                    onTextChange = vm::onDraftChange,
+                    onSend = vm::send,
+                    onPickPhoto = {
+                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
+                    onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                )
+            }
         }
     }
 
     viewerImage?.let { image ->
-        ImageViewerDialog(attachment = image, onDismiss = { viewerImage = null })
+        ImageViewerDialog(image = image, onDismiss = { viewerImage = null })
+    }
+
+    val fingerprint = header?.fingerprint
+    if (showFingerprint && fingerprint != null) {
+        FingerprintDialog(
+            fingerprint = fingerprint,
+            peerName = header?.title.orEmpty(),
+            onDismiss = { showFingerprint = false },
+        )
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.secret_delete)) },
+            text = { Text(stringResource(R.string.secret_delete_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        vm.deleteSecretChat()
+                    },
+                ) {
+                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 
 @Composable
-private fun ConversationTopBar(header: ConversationHeader?, onBack: () -> Unit) {
+private fun ConversationTopBar(
+    header: ConversationHeader?,
+    onBack: () -> Unit,
+    onShowKey: () -> Unit,
+    onStartSecret: () -> Unit,
+    onDeleteSecret: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val secretAccent = NokatTheme.colors.secretOnTopBar
     GradientTopBar(
         navigationIcon = {
             IconButton(onClick = onBack) {
@@ -278,7 +396,11 @@ private fun ConversationTopBar(header: ConversationHeader?, onBack: () -> Unit) 
         },
         title = {
             if (header != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                val canShowKey = header.isSecret && header.fingerprint != null
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = if (canShowKey) Modifier.clickable(onClick = onShowKey) else Modifier,
+                ) {
                     Avatar(
                         title = header.title,
                         seed = header.avatarSeed,
@@ -287,16 +409,197 @@ private fun ConversationTopBar(header: ConversationHeader?, onBack: () -> Unit) 
                     )
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text(
-                            text = header.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (header.isSecret) {
+                                Icon(
+                                    Icons.Filled.Lock,
+                                    contentDescription = stringResource(R.string.secret_chat),
+                                    tint = secretAccent,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                            }
+                            Text(
+                                text = header.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (header.isSecret) secretAccent else Color.Unspecified,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         HeaderStatusText(header.status)
                     }
                 }
             }
+        },
+        actions = {
+            if (header != null && header.isSecret && header.fingerprint != null) {
+                IconButton(onClick = onShowKey) {
+                    Icon(
+                        Icons.Filled.Lock,
+                        contentDescription = stringResource(R.string.secret_key_show),
+                        tint = secretAccent,
+                    )
+                }
+            }
+            if (header != null && (header.isSecret || header.canStartSecret)) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.more))
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (header.canStartSecret) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.secret_chat_start)) },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Lock, contentDescription = null, tint = NokatTheme.colors.secret)
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    onStartSecret()
+                                },
+                            )
+                        }
+                        if (header.isSecret) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(stringResource(R.string.secret_delete), color = MaterialTheme.colorScheme.error)
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    onDeleteSecret()
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** Bottom bar replacing the composer when this device cannot write (pending / other device). */
+@Composable
+private fun SecretStatusBar(text: String, hint: String?) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.titleSmall,
+                color = NokatTheme.colors.secret,
+                textAlign = TextAlign.Center,
+            )
+            if (hint != null) {
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Peer side of a pending secret chat: accept (generates this device's key) or decline (deletes it). */
+@Composable
+private fun SecretInvitation(name: String, busy: Boolean, onAccept: () -> Unit, onDecline: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = NokatTheme.colors.secret,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.secret_invite_preview),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = NokatTheme.colors.secret,
+                )
+            }
+            Text(
+                text = stringResource(R.string.secret_invite_body, name),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
+            )
+            Row(Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = onDecline,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.secret_decline))
+                }
+                Spacer(Modifier.width(12.dp))
+                Button(
+                    onClick = onAccept,
+                    enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = NokatTheme.colors.secret),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White,
+                        )
+                    } else {
+                        Text(stringResource(R.string.secret_accept), color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** "Şifrleme açary": fingerprint in 2 lines of 4 monospace groups + explanation. */
+@Composable
+private fun FingerprintDialog(fingerprint: String, peerName: String, onDismiss: () -> Unit) {
+    val groups = fingerprint.split(' ')
+    val formatted = groups.take(4).joinToString(" ") + "\n" + groups.drop(4).joinToString(" ")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = NokatTheme.colors.secret) },
+        title = { Text(stringResource(R.string.secret_key_title)) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = formatted,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = NokatTheme.colors.secret,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                        .padding(vertical = 12.dp),
+                )
+                Text(
+                    text = stringResource(R.string.secret_key_body, peerName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 14.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.ok)) }
         },
     )
 }

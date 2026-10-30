@@ -46,7 +46,7 @@ private const val DOUBLE_TAP_ZOOM = 2.5f
 
 /** Full-screen photo viewer: pinch to zoom, drag to pan, double-tap to toggle zoom. */
 @Composable
-fun ImageViewerDialog(attachment: AttachmentUi, onDismiss: () -> Unit) {
+fun ImageViewerDialog(image: ViewerImage, onDismiss: () -> Unit) {
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -61,8 +61,8 @@ fun ImageViewerDialog(attachment: AttachmentUi, onDismiss: () -> Unit) {
                 .background(Color.Black),
         ) {
             AsyncImage(
-                model = attachment.previewModel,
-                contentDescription = attachment.name,
+                model = image.model,
+                contentDescription = image.name,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
@@ -114,14 +114,15 @@ fun ImageViewerDialog(attachment: AttachmentUi, onDismiss: () -> Unit) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close), tint = Color.White)
                 }
                 Text(
-                    text = attachment.name,
+                    text = image.name,
                     color = Color.White,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                val remoteUrl = attachment.remoteUrl
+                // Never offered for secret-chat photos (remoteUrl is null there).
+                val remoteUrl = image.remoteUrl
                 if (remoteUrl != null) {
                     val shareTitle = stringResource(R.string.share)
                     val noApp = stringResource(R.string.error_no_app_to_open)

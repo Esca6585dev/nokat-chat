@@ -3,6 +3,7 @@ package com.nokat.chat.ui.newchat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -32,21 +34,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nokat.chat.R
 import com.nokat.chat.ui.common.GradientTopBar
 import com.nokat.chat.ui.common.nokatViewModel
+import com.nokat.chat.ui.theme.NokatTheme
 import com.nokat.chat.util.asString
 
 @Composable
 fun UserSearchScreen(
+    secretMode: Boolean,
     onBack: () -> Unit,
     onNewGroup: () -> Unit,
+    onNewSecretChat: () -> Unit,
     onChatOpened: (String) -> Unit,
 ) {
-    val vm = nokatViewModel { UserSearchViewModel(it.userRepository, it.chatRepository, it.sessionManager) }
+    val vm = nokatViewModel {
+        UserSearchViewModel(
+            users = it.userRepository,
+            chats = it.chatRepository,
+            session = it.sessionManager,
+            secretChats = it.secretChats,
+            secretMode = secretMode,
+        )
+    }
     val currentOnChatOpened by rememberUpdatedState(onChatOpened)
     LaunchedEffect(vm) { vm.openChat.collect { currentOnChatOpened(it) } }
     val recent = remember(vm) { vm.recentPeople }
@@ -86,9 +101,50 @@ fun UserSearchScreen(
             val showingQuery = vm.query.isNotBlank()
             val people = if (showingQuery) vm.results else recent
             LazyColumn(Modifier.fillMaxSize()) {
-                item(key = "new-group", contentType = "action") {
-                    NewGroupRow(onClick = onNewGroup)
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                if (secretMode) {
+                    item(key = "secret-header", contentType = "info") {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.Lock,
+                                contentDescription = null,
+                                tint = NokatTheme.colors.secret,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.secret_chat_new_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = NokatTheme.colors.secret,
+                                )
+                                Text(
+                                    text = stringResource(R.string.secret_chat_new_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                    }
+                } else {
+                    item(key = "new-group", contentType = "action") {
+                        ActionRow(
+                            icon = Icons.Filled.Person,
+                            text = stringResource(R.string.new_group),
+                            color = MaterialTheme.colorScheme.primary,
+                            onClick = onNewGroup,
+                        )
+                        ActionRow(
+                            icon = Icons.Filled.Lock,
+                            text = stringResource(R.string.secret_chat_start),
+                            color = NokatTheme.colors.secret,
+                            onClick = onNewSecretChat,
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                    }
                 }
                 val error = vm.error
                 if (error != null) {
@@ -143,28 +199,27 @@ fun UserSearchScreen(
 }
 
 @Composable
-private fun NewGroupRow(onClick: () -> Unit) {
+private fun ActionRow(icon: ImageVector, text: String, color: Color, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
                 .size(46.dp)
-                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                .background(color.copy(alpha = 0.14f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(icon, contentDescription = null, tint = color)
         }
         Spacer(Modifier.width(14.dp))
         Text(
-            text = stringResource(R.string.new_group),
+            text = text,
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = color,
         )
     }
 }
-

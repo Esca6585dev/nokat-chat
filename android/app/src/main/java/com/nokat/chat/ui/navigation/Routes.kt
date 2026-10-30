@@ -16,8 +16,9 @@ object ProfileSetupRoute
 @Serializable
 object ChatsRoute
 
+/** [secret] = true → picking a user starts an end-to-end encrypted secret chat. */
 @Serializable
-object UserSearchRoute
+data class UserSearchRoute(val secret: Boolean = false)
 
 @Serializable
 object NewGroupRoute

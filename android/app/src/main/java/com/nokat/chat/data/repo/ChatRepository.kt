@@ -9,9 +9,12 @@ import com.nokat.chat.data.model.GroupChatRequest
 import com.nokat.chat.data.model.LocalFile
 import com.nokat.chat.data.model.Message
 import com.nokat.chat.data.model.MessageStatus
+import com.nokat.chat.data.model.SecretAcceptRequest
+import com.nokat.chat.data.model.SecretChatRequest
 import com.nokat.chat.data.model.SendMessageRequest
 import com.nokat.chat.data.realtime.RealtimeClient
 import com.nokat.chat.data.realtime.WsEvent
+import com.nokat.chat.data.remote.ByteArrayProgressBody
 import com.nokat.chat.data.remote.ContentUriRequestBody
 import com.nokat.chat.data.remote.NokatApi
 import com.nokat.chat.data.remote.decodeList
@@ -23,7 +26,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -32,7 +38,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
+import retrofit2.HttpException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -55,6 +63,10 @@ class ChatRepository(
     val typing: StateFlow<Map<String, Set<String>>> = _typing.asStateFlow()
 
     private val typingExpiry = ConcurrentHashMap<String, Job>()
+
+    /** Ids of chats that were deleted (secret chat deleted by either side). */
+    private val _removedChats = MutableSharedFlow<String>(extraBufferCapacity = 32)
+    val removedChats: SharedFlow<String> = _removedChats.asSharedFlow()
 
     /** Chat currently open and visible: incoming messages there don't bump unread. */
     @Volatile
@@ -89,6 +101,21 @@ class ChatRepository(
     suspend fun createGroup(title: String, memberIds: List<String>): Chat =
         api.createGroupChat(GroupChatRequest(title, memberIds)).also { upsertChat(it) }
 
+    /** POST /chats/secret. [publicKey] is base64 of the 65-byte raw point. */
+    suspend fun createSecretChat(userId: String, publicKey: String): Chat =
+        api.createSecretChat(SecretChatRequest(userId, publicKey)).also { upsertChat(it) }
+
+    /** POST /chats/:id/secret/accept. */
+    suspend fun acceptSecretChat(chatId: String, publicKey: String): Chat =
+        api.acceptSecretChat(chatId, SecretAcceptRequest(publicKey)).also { upsertChat(it) }
+
+    /** DELETE /chats/:id (secret chats). A 404 means it is already gone. */
+    suspend fun deleteChat(chatId: String) {
+        val response = scope.async { api.deleteChat(chatId) }.await()
+        if (!response.isSuccessful && response.code() != 404) throw HttpException(response)
+        removeChatLocally(chatId)
+    }
+
     /** GET /chats/:id/messages, oldest → newest. */
     suspend fun loadMessages(chatId: String, before: String?, limit: Int = PAGE_SIZE): List<Message> =
         json.decodeList(api.messages(chatId, before, limit), Message.serializer())
@@ -102,8 +129,9 @@ class ChatRepository(
         text: String,
         clientId: String,
         attachmentId: String? = null,
+        ciphertext: String? = null,
     ): Message =
-        scope.async { api.sendMessage(chatId, SendMessageRequest(text, clientId, attachmentId)) }
+        scope.async { api.sendMessage(chatId, SendMessageRequest(text, clientId, attachmentId, ciphertext)) }
             .await()
             .also { onMessage(it) }
 
@@ -121,6 +149,13 @@ class ChatRepository(
                 onProgress = onProgress,
             )
             api.upload(MultipartBody.Part.createFormData("file", file.name, body))
+        }.await()
+
+    /** POST /uploads with in-memory bytes (encrypted secret-chat blobs), as `application/octet-stream`. */
+    suspend fun uploadBytes(bytes: ByteArray, fileName: String, onProgress: (Float) -> Unit): Attachment =
+        scope.async(Dispatchers.IO) {
+            val body = ByteArrayProgressBody(bytes, "application/octet-stream".toMediaType(), onProgress)
+            api.upload(MultipartBody.Part.createFormData("file", fileName, body))
         }.await()
 
     fun markRead(chatId: String) {
@@ -187,6 +222,8 @@ class ChatRepository(
                 }
             }
             is WsEvent.ChatNew -> upsertChat(event.chat)
+            is WsEvent.ChatUpdated -> upsertChat(event.chat)
+            is WsEvent.ChatDeleted -> removeChatLocally(event.chatId)
             is WsEvent.Typing -> if (event.userId != me) setTyping(event.chatId, event.userId, event.typing)
             is WsEvent.Presence -> _chats.update { list ->
                 list.map { chat ->
@@ -239,6 +276,13 @@ class ChatRepository(
         } else {
             new
         }
+
+    private fun removeChatLocally(chatId: String) {
+        _chats.update { list -> list.filterNot { it.id == chatId } }
+        _typing.update { it - chatId }
+        if (activeChatId == chatId) activeChatId = null
+        _removedChats.tryEmit(chatId)
+    }
 
     private fun upsertChat(chat: Chat) {
         _chats.update { list ->

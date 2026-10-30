@@ -31,10 +31,14 @@ data class Message(
     /** "text" | "image" | "file". Defaults to text for older servers. */
     val kind: String = MessageKind.TEXT,
     val attachment: Attachment? = null,
+    /** Secret chats only: base64(IV ‖ AES-GCM(payload JSON)); "" for normal messages. */
+    val ciphertext: String = "",
     /** Local-only: optimistic message whose delivery failed. */
     @Transient val failed: Boolean = false,
     /** Local-only: the picked file behind an optimistic attachment message (kept for preview/retry). */
     @Transient val localFile: LocalFile? = null,
+    /** Local-only: encrypted upload metadata (incl. file key) of an optimistic secret message, for retry. */
+    @Transient val secretFile: SecretFile? = null,
 ) {
     val isPending: Boolean get() = status == MessageStatus.SENDING
 
@@ -49,6 +53,9 @@ object MessageKind {
     const val TEXT = "text"
     const val IMAGE = "image"
     const val FILE = "file"
+
+    /** Every message in a secret chat; the real kind is inside the decrypted payload. */
+    const val ENCRYPTED = "encrypted"
 }
 
 /** Mirrors the `Attachment` model in docs/API.md (also the response of POST /uploads). */
@@ -105,13 +112,56 @@ data class Chat(
     @SerialName("last_message") val lastMessage: Message? = null,
     @SerialName("unread_count") val unreadCount: Int = 0,
     @SerialName("updated_at") val updatedAt: String = "",
+    /** Only for secret chats (`type == "secret"`), null otherwise. */
+    val secret: SecretInfo? = null,
 ) {
     val isGroup: Boolean get() = type == ChatType.GROUP
+    val isSecret: Boolean get() = type == ChatType.SECRET
 }
+
+/** `Chat.secret` from docs/SECRET_CHATS.md. Keys are base64 of the 65-byte raw P-256 point. */
+@Serializable
+data class SecretInfo(
+    val state: String = SecretState.PENDING,
+    @SerialName("initiator_id") val initiatorId: String = "",
+    @SerialName("initiator_key") val initiatorKey: String = "",
+    /** "" while pending. */
+    @SerialName("peer_key") val peerKey: String = "",
+)
+
+object SecretState {
+    const val PENDING = "pending"
+    const val ACTIVE = "active"
+}
+
+/** Plaintext inside a secret message's `ciphertext` (docs/SECRET_CHATS.md, v1). */
+@Serializable
+data class SecretPayload(
+    val v: Int = 1,
+    val kind: String = MessageKind.TEXT,
+    val text: String = "",
+    val file: SecretFile? = null,
+)
+
+@Serializable
+data class SecretFile(
+    @SerialName("upload_id") val uploadId: String = "",
+    /** Root-relative URL of the encrypted blob. */
+    val url: String = "",
+    /** base64 of the random 32-byte AES key for this file only. */
+    val key: String = "",
+    val name: String = "",
+    val mime: String = "",
+    /** Size of the original (plaintext) file. */
+    val size: Long = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+)
 
 object ChatType {
     const val DIRECT = "direct"
     const val GROUP = "group"
+    const val SECRET = "secret"
 }
 
 val User.displayName: String
@@ -178,7 +228,18 @@ data class SendMessageRequest(
     val text: String,
     @SerialName("client_id") val clientId: String,
     @SerialName("attachment_id") val attachmentId: String? = null,
+    /** Secret chats: required, and [text] must be "". Omitted when null. */
+    val ciphertext: String? = null,
 )
+
+@Serializable
+data class SecretChatRequest(
+    @SerialName("user_id") val userId: String,
+    @SerialName("public_key") val publicKey: String,
+)
+
+@Serializable
+data class SecretAcceptRequest(@SerialName("public_key") val publicKey: String)
 
 @Serializable
 data class OkResponse(val ok: Boolean = false)
@@ -198,6 +259,9 @@ data class TypingPayload(
     @SerialName("user_id") val userId: String = "",
     val typing: Boolean = false,
 )
+
+@Serializable
+data class ChatDeletedPayload(@SerialName("chat_id") val chatId: String)
 
 @Serializable
 data class PresencePayload(

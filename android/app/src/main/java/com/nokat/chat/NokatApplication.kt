@@ -10,6 +10,8 @@ class NokatApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Decrypted secret-chat files shared with other apps must not outlive a killed process.
+        java.io.File(cacheDir, "secret").deleteRecursively()
         container = AppContainer(this)
     }
 }

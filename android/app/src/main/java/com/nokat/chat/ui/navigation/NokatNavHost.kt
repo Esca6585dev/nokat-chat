@@ -125,14 +125,22 @@ private fun NokatNavHost(container: AppContainer, startDestination: Any) {
         composable<ChatsRoute> {
             ChatListScreen(
                 onOpenChat = { chatId -> navController.navigate(ConversationRoute(chatId)) },
-                onNewChat = { navController.navigate(UserSearchRoute) },
+                onNewChat = { navController.navigate(UserSearchRoute()) },
+                onNewSecretChat = { navController.navigate(UserSearchRoute(secret = true)) },
                 onNewGroup = { navController.navigate(NewGroupRoute) },
                 onSettings = { navController.navigate(SettingsRoute) },
             )
         }
-        composable<UserSearchRoute> {
+        composable<UserSearchRoute> { entry ->
+            val route = entry.toRoute<UserSearchRoute>()
             UserSearchScreen(
+                secretMode = route.secret,
                 onBack = { navController.popBackStack() },
+                onNewSecretChat = {
+                    navController.navigate(UserSearchRoute(secret = true)) {
+                        popUpTo<UserSearchRoute> { inclusive = true }
+                    }
+                },
                 onNewGroup = {
                     navController.navigate(NewGroupRoute) {
                         popUpTo<UserSearchRoute> { inclusive = true }
@@ -160,6 +168,12 @@ private fun NokatNavHost(container: AppContainer, startDestination: Any) {
             ConversationScreen(
                 chatId = route.chatId,
                 onBack = { navController.popBackStack() },
+                onOpenChat = { chatId ->
+                    // e.g. "start secret chat" from a direct chat: replace the current conversation.
+                    navController.navigate(ConversationRoute(chatId)) {
+                        popUpTo<ConversationRoute> { inclusive = true }
+                    }
+                },
             )
         }
         composable<SettingsRoute> {
